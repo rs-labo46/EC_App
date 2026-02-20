@@ -3,115 +3,112 @@ package repository
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"app/internal/domain/model"
-	coreRepo "app/internal/repository"
+	repo "app/internal/repository"
 
 	"gorm.io/gorm"
 )
 
-// refreshTokenRepositoryはRefreshTokenRepositoryのGORM実装
-type refreshTokenRepository struct {
-	db *gorm.DB
+type refreshTokenGormRepository struct {
+	db *gorm.DB //DB接続（GORM）
 }
 
-// DIコンストラクター（interfaceを返すとDIが綺麗）
-func NewRefreshTokenRepository(db *gorm.DB) coreRepo.RefreshTokenRepository {
-	return &refreshTokenRepository{db: db}
+// GORM実装
+func NewRefreshTokenRepository(db *gorm.DB) repo.RefreshTokenRepository {
+	return &refreshTokenGormRepository{db: db}
 }
 
-// Create はrefreshtokenを新規保存します。
-func (r *refreshTokenRepository) Create(ctx context.Context, token *model.RefreshToken) error {
-	if token == nil {
-		return fmt.Errorf("token is nil")
-	}
-
+// リフレッシュトークンを保存し。
+func (r *refreshTokenGormRepository) Create(ctx context.Context, token *model.RefreshToken) error {
+	//タイムアウトやキャンセルをDB処理に伝える
 	if err := r.db.WithContext(ctx).Create(token).Error; err != nil {
 		return err
 	}
-
 	return nil
 }
 
-// FindByTokenHashはハッシュ値からrefreshtokenを1件取得します。
-func (r *refreshTokenRepository) FindByTokenHash(ctx context.Context, tokenHash string) (*model.RefreshToken, error) {
-	var t model.RefreshToken
+// token_hashで1件検索します。
+func (r *refreshTokenGormRepository) FindByTokenHash(ctx context.Context, tokenHash string) (*model.RefreshToken, error) {
+	var token model.RefreshToken
 
 	err := r.db.WithContext(ctx).
-		First(&t, "token_hash = ?", tokenHash).
-		Error
+		Where("token_hash = ?", tokenHash).
+		First(&token).Error
+
 	if err != nil {
+
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, coreRepo.ErrRefreshTokenNotFound
+			return nil, repo.ErrRefreshTokenNotFound
 		}
 		return nil, err
 	}
 
-	return &t, nil
+	return &token, nil
 }
 
-// MarkUsedは使用済み時刻（UsedAt）を保存
-func (r *refreshTokenRepository) MarkUsed(ctx context.Context, tokenID string, usedAt time.Time) error {
-	tx := r.db.WithContext(ctx).
-		Model(&model.RefreshToken{}).
-		Where("id = ?", tokenID).
-		UpdateColumn("used_at", usedAt)
+// used_at をセットして「使用済み」にします。
+func (r *refreshTokenGormRepository) MarkUsed(ctx context.Context, tokenID string) error {
+	now := time.Now()
 
-	if tx.Error != nil {
-		return tx.Error
+	result := r.db.WithContext(ctx).
+		Model(&model.RefreshToken{}).
+		Where("id = ? AND used_at IS NULL AND revoked_at IS NULL", tokenID).
+		Update("used_at", &now)
+
+	if result.Error != nil {
+		return result.Error
 	}
 
-	if tx.RowsAffected == 0 {
-		return coreRepo.ErrRefreshTokenNotFound
+	// 更新件数が0なら「すでに使用済み/無効/存在しない」の可能性
+	if result.RowsAffected == 0 {
+		return repo.ErrRefreshTokenNotFound
 	}
 
 	return nil
 }
 
-// Revokeは無効化時刻（RevokedAt）を保存
-func (r *refreshTokenRepository) Revoke(ctx context.Context, tokenID string, revokedAt time.Time) error {
-	tx := r.db.WithContext(ctx).
+// revoked_atをセットして無効。
+func (r *refreshTokenGormRepository) Revoke(ctx context.Context, tokenID string) error {
+	now := time.Now()
+
+	result := r.db.WithContext(ctx).
 		Model(&model.RefreshToken{}).
-		Where("id = ?", tokenID).
-		UpdateColumn("revoked_at", revokedAt)
+		Where("id = ? AND revoked_at IS NULL", tokenID).
+		Update("revoked_at", &now)
 
-	if tx.Error != nil {
-		return tx.Error
+	if result.Error != nil {
+		return result.Error
 	}
-
-	if tx.RowsAffected == 0 {
-		return coreRepo.ErrRefreshTokenNotFound
+	if result.RowsAffected == 0 {
+		return repo.ErrRefreshTokenNotFound
 	}
 
 	return nil
 }
 
-// DeleteAllByUserIDはユーザーのrefreshtokenを全削除
-func (r *refreshTokenRepository) DeleteAllByUserID(ctx context.Context, userID string) error {
+// 指定ユーザーのリフレッシュトークンを全削除します。
+func (r *refreshTokenGormRepository) DeleteAllByUserID(ctx context.Context, userID string) error {
 	if err := r.db.WithContext(ctx).
 		Where("user_id = ?", userID).
-		Delete(&model.RefreshToken{}).
-		Error; err != nil {
+		Delete(&model.RefreshToken{}).Error; err != nil {
 		return err
 	}
-
 	return nil
 }
 
-// DeleteByIDは特定のrefreshtokenを削除
-func (r *refreshTokenRepository) DeleteByID(ctx context.Context, tokenID string) error {
-	tx := r.db.WithContext(ctx).
+// 指定IDのリフレッシュトークンを削除。
+func (r *refreshTokenGormRepository) DeleteByID(ctx context.Context, tokenID string) error {
+	result := r.db.WithContext(ctx).
 		Where("id = ?", tokenID).
 		Delete(&model.RefreshToken{})
 
-	if tx.Error != nil {
-		return tx.Error
+	if result.Error != nil {
+		return result.Error
 	}
-
-	if tx.RowsAffected == 0 {
-		return coreRepo.ErrRefreshTokenNotFound
+	if result.RowsAffected == 0 {
+		return repo.ErrRefreshTokenNotFound
 	}
 
 	return nil

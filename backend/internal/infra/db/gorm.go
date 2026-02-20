@@ -1,39 +1,46 @@
 package db
 
 import (
+	"app/internal/config"
 	"fmt"
-	"os"
+	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
-// Connect はDBに接続して *gorm.DB を返す。
-func Connect() (*gorm.DB, error) {
-	// DATABASE_URL があれば最優先で使う
-	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
-		return gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	}
-
-	host := getenv("POSTGRES_HOST", "localhost")
-	port := getenv("POSTGRES_PORT", "5432")
-	user := getenv("POSTGRES_USER", "postgres")
-	pass := getenv("POSTGRES_PASSWORD", "postgres")
-	name := getenv("POSTGRES_DB", "app")
-	ssl := getenv("POSTGRES_SSLMODE", "disable")
-
+// DB接続
+func NewGorm(cfg config.Config) (*gorm.DB, error) {
 	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		host, port, user, pass, name, ssl,
+		"host=%s user=%s password=%s dbname=%s port=%d sslmode=disable TimeZone=Asia/Tokyo",
+		cfg.PostgresHost,
+		cfg.PostgresUser,
+		cfg.PostgresPassword,
+		cfg.PostgresDB,
+		cfg.PostgresPort,
 	)
 
-	return gorm.Open(postgres.Open(dsn), &gorm.Config{})
-}
-
-func getenv(key string, def string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
+	//ログの設定
+	gormLogger := logger.Default
+	if cfg.GoEnv == "prod" {
+		gormLogger = gormLogger.LogMode(logger.Silent)
+	} else {
+		gormLogger = gormLogger.LogMode(logger.Info)
 	}
-	return v
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: gormLogger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("データベースへの接続に失敗しました: %w", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("SQLデータベースの取得に失敗しました: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(10) //
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+
+	return db, nil
 }
