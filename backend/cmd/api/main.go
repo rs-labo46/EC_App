@@ -41,6 +41,8 @@ func main() {
 	if err := gormDB.AutoMigrate(
 		&model.User{},
 		&model.RefreshToken{},
+		&model.Product{},
+		&model.InventoryAdjustment{},
 	); err != nil {
 		log.Fatalf("migrate error: %v", err)
 	}
@@ -71,6 +73,17 @@ func main() {
 	//Handler(強制ログアウト)
 	adminUserH := handler.NewAdminUserHandler(cfg, userRepo, authUC)
 	adminUserH.RegisterRoutes(e)
+
+	//product
+	// Products
+	productRepo := infrarepo.NewProductGormRepository(gormDB)
+	productUC := usecase.NewProductUsecase(productRepo, productRepo)
+
+	productH := handler.NewProductHandler(productUC)
+	productH.RegisterRoutes(e)
+
+	adminProductH := handler.NewAdminProductHandler(productUC)
+	adminProductH.RegisterRoutes(e, cfg, userRepo)
 
 	// サーバ起動
 	log.Fatal(e.Start(":" + cfg.Port))
