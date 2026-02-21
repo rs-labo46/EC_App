@@ -4,7 +4,12 @@ import (
 	"log"
 
 	"app/internal/config"
+	"app/internal/domain/model"
+	"app/internal/handler"
 	"app/internal/infra/db"
+	infrarepo "app/internal/infra/repository"
+	"app/internal/usecase"
+	"app/internal/validator"
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
@@ -33,6 +38,13 @@ func main() {
 	}
 	log.Println("db connected:", sqlDB.Stats().OpenConnections)
 
+	if err := gormDB.AutoMigrate(
+		&model.User{},
+		&model.RefreshToken{},
+	); err != nil {
+		log.Fatalf("migrate error: %v", err)
+	}
+
 	// Echoサーバを起動する
 	e := echo.New()
 
@@ -41,6 +53,26 @@ func main() {
 		return c.String(200, "ok")
 	})
 
+	// DI（依存注入）
+	// Repository（GORM実装）
+	userRepo := infrarepo.NewUserGormRepository(gormDB)
+	rtRepo := infrarepo.NewRefreshTokenGormRepository(gormDB)
+
+	//Validator（usecase.AuthValidator の実装）
+	authValidator := validator.NewAuthValidator(userRepo)
+
+	//Usecase
+	authUC := usecase.NewAuthUsecase(cfg, userRepo, rtRepo, authValidator)
+
+	//Handler（ルーティング登録）
+	authH := handler.NewAuthHandler(cfg, authUC, userRepo)
+	authH.RegisterRoutes(e)
+
+	//Handler(強制ログアウト)
+	adminUserH := handler.NewAdminUserHandler(cfg, userRepo, authUC)
+	adminUserH.RegisterRoutes(e)
+
 	// サーバ起動
 	log.Fatal(e.Start(":" + cfg.Port))
+
 }

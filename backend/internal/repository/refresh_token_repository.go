@@ -23,7 +23,7 @@ type RefreshTokenRepository interface {
 	Revoke(ctx context.Context, tokenID string) error
 
 	//そのユーザーのrefreshを全部消す処理です。再利用検知や強制ログアウトで必要。
-	DeleteAllByUserID(ctx context.Context, userID string) error
+	DeleteAllByUserID(ctx context.Context, userID int64) error
 
 	//1件削除
 	DeleteByID(ctx context.Context, tokenID string) error

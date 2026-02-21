@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -136,7 +135,6 @@ func (u *AuthUsecase) Register(ctx context.Context, req AuthRegisterRequest) (*A
 
 	//ユーザー作成
 	user := &model.User{
-		// ID はDB側で採番する想定（推奨）。uuidを入れない。
 		Email:        req.Email,
 		PasswordHash: string(pwHash),
 		Role:         model.RoleUser,
@@ -243,6 +241,34 @@ func (u *AuthUsecase) Login(ctx context.Context, req AuthLoginRequest, userAgent
 	}
 
 	return res, nil
+}
+
+// model.UserをAPI返却用DTOに変換。
+func toUserDTO(u *model.User) UserDTO {
+	return UserDTO{
+		ID:           u.ID,
+		Email:        u.Email,
+		Role:         string(u.Role),
+		TokenVersion: u.TokenVersion,
+		IsActive:     u.IsActive,
+	}
+}
+func (u *AuthUsecase) Me(ctx context.Context, userID int64) (*UserDTO, error) {
+	if userID <= 0 {
+		return nil, ErrUnauthorized
+	}
+
+	user, err := u.users.FindByID(ctx, userID)
+	if err != nil || user == nil {
+		return nil, ErrUnauthorized
+	}
+
+	if !user.IsActive {
+		return nil, ErrForbidden
+	}
+
+	dto := toUserDTO(user)
+	return &dto, nil
 }
 
 func (u *AuthUsecase) Refresh(ctx context.Context, refreshTokenPlain string, userAgent string, ip string) (*RefreshResult, error) {
@@ -373,31 +399,22 @@ func (u *AuthUsecase) ForceLogout(ctx context.Context, targetUserID int64) (*For
 		return nil, ErrValidation
 	}
 
-	//ドメインがstringの場合に備えて、ここは文字列へ変換して呼ぶ
-	targetIDStr := strconv.FormatInt(targetUserID, 10)
-
-	if err := u.users.IncrementTokenVersion(ctx, targetIDStr); err != nil {
+	if err := u.users.IncrementTokenVersion(ctx, targetUserID); err != nil {
 		return nil, ErrInternal
 	}
 
-	if err := u.rtRepo.DeleteAllByUserID(ctx, targetIDStr); err != nil {
+	if err := u.rtRepo.DeleteAllByUserID(ctx, targetUserID); err != nil {
 		return nil, ErrInternal
 	}
 
 	//更新後を取得してnew_token_versionを返す
-	user, err := u.users.FindByID(ctx, targetIDStr)
+	user, err := u.users.FindByID(ctx, targetUserID)
 	if err != nil || user == nil {
 		return nil, ErrInternal
 	}
 
-	// user.ID は数値文字列
-	uid, convErr := strconv.ParseInt(user.ID, 10, 64)
-	if convErr != nil {
-		return nil, ErrInternal
-	}
-
 	return &ForceLogoutResponse{
-		UserID:          uid,
+		UserID:          user.ID,
 		NewTokenVersion: user.TokenVersion,
 	}, nil
 }
@@ -446,13 +463,9 @@ func hashToken(plain string) string {
 }
 
 func toUserDTOOpenAPI(u *model.User) (UserDTO, error) {
-	id, err := strconv.ParseInt(u.ID, 10, 64)
-	if err != nil {
-		return UserDTO{}, err
-	}
 
 	return UserDTO{
-		ID:           id,
+		ID:           u.ID,
 		Email:        u.Email,
 		Role:         string(u.Role),
 		TokenVersion: u.TokenVersion,
