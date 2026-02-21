@@ -74,10 +74,10 @@ func main() {
 	adminUserH := handler.NewAdminUserHandler(cfg, userRepo, authUC)
 	adminUserH.RegisterRoutes(e)
 
-	//product
 	// Products
 	productRepo := infrarepo.NewProductGormRepository(gormDB)
-	productUC := usecase.NewProductUsecase(productRepo, productRepo)
+	inventoryRepo := infrarepo.NewInventoryGormRepository(gormDB)
+	productUC := usecase.NewProductUsecase(productRepo, inventoryRepo)
 
 	productH := handler.NewProductHandler(productUC)
 	productH.RegisterRoutes(e)

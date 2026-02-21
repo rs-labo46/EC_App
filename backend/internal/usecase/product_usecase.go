@@ -250,12 +250,32 @@ func (u *ProductUsecase) AdminUpdateInventory(ctx context.Context, adminUserID i
 	if strings.TrimSpace(reason) == "" {
 		return NewHTTPError(http.StatusBadRequest, "reason required")
 	}
-
-	err := u.inventoryRepo.SetStockWithAdjustment(ctx, adminUserID, productID, newStock, strings.TrimSpace(reason))
+	p, err := u.productRepo.FindByID(ctx, productID)
 	if err == repo.ErrNotFound {
 		return NewHTTPError(http.StatusNotFound, "not found")
 	}
 	if err != nil {
+		return NewHTTPError(http.StatusInternalServerError, "db error")
+	}
+
+	//在庫の現在値を更新
+	if err := u.inventoryRepo.SetStock(ctx, productID, newStock); err != nil {
+		if err == repo.ErrNotFound {
+			return NewHTTPError(http.StatusNotFound, "not found")
+		}
+		return NewHTTPError(http.StatusInternalServerError, "db error")
+	}
+
+	//履歴を作成
+	adj := model.InventoryAdjustment{
+		ProductID:   productID,
+		AdminUserID: adminUserID,
+		Delta:       newStock - p.Stock,
+		Reason:      strings.TrimSpace(reason),
+		CreatedAt:   time.Now(),
+	}
+
+	if err := u.inventoryRepo.CreateAdjustment(ctx, adj); err != nil {
 		return NewHTTPError(http.StatusInternalServerError, "db error")
 	}
 

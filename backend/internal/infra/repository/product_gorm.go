@@ -119,39 +119,17 @@ func (r *ProductGormRepository) SoftDelete(ctx context.Context, id int64) error 
 }
 
 // 在庫を「現在値」に更新し、調整履歴も残す
-func (r *ProductGormRepository) SetStockWithAdjustment(ctx context.Context, adminUserID int64, productID int64, newStock int64, reason string) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		//現在の在庫を取得
-		var p model.Product
-		if err := tx.First(&p, productID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return repo.ErrNotFound
-			}
-			return err
-		}
+func (r *ProductGormRepository) SetActive(ctx context.Context, productID int64, isActive bool) error {
+	res := r.db.WithContext(ctx).
+		Model(&model.Product{}).
+		Where("id = ?", productID).
+		Update("is_active", isActive)
 
-		//products.stockを更新
-		res := tx.Model(&model.Product{}).
-			Where("id = ?", productID).
-			Update("stock", newStock)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return repo.ErrNotFound
-		}
-
-		//adjustmentsを作成
-		adj := model.InventoryAdjustment{
-			ProductID:   productID,
-			AdminUserID: adminUserID,
-			Delta:       newStock - p.Stock,
-			Reason:      reason,
-		}
-		if err := tx.Create(&adj).Error; err != nil {
-			return err
-		}
-
-		return nil
-	})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return repo.ErrNotFound
+	}
+	return nil
 }
