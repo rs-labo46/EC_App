@@ -43,6 +43,8 @@ func main() {
 		&model.RefreshToken{},
 		&model.Product{},
 		&model.InventoryAdjustment{},
+		&model.Cart{},
+		&model.CartItem{},
 	); err != nil {
 		log.Fatalf("migrate error: %v", err)
 	}
@@ -84,6 +86,13 @@ func main() {
 
 	adminProductH := handler.NewAdminProductHandler(productUC)
 	adminProductH.RegisterRoutes(e, cfg, userRepo)
+
+	// Cart
+	cartRepoImpl := infrarepo.NewCartGormRepository(gormDB)
+	// usecase
+	cartUC := usecase.NewCartUsecase(cartRepoImpl, cartRepoImpl, productRepo)
+	cartH := handler.NewCartHandler(cartUC)
+	cartH.RegisterRoutes(e, cfg, userRepo)
 
 	// サーバ起動
 	log.Fatal(e.Start(":" + cfg.Port))
