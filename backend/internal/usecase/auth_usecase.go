@@ -18,24 +18,24 @@ import (
 )
 
 var (
-	//400 入力不足
+	// 400 入力不足
 	ErrValidation = errors.New("validation error")
-	//401 認証失敗
+	// 401 認証失敗
 	ErrUnauthorized = errors.New("unauthorized")
-	//403　権限
-	ErrForbidden = errors.New("forbidden ")
-	//401 再利用されてしまっている
+	// 403 権限
+	ErrForbidden = errors.New("forbidden")
+	// 401 再利用されてしまっている
 	ErrSecurityIncident = errors.New("security incident")
-	//競合
+	// 409 競合
 	ErrConflict = errors.New("conflict")
-	//500
+	// 500
 	ErrInternal = errors.New("internal error")
 )
 
-// accesstokenの有効期限
+// access tokenの有効期限
 const accessTokenTTL = 15 * time.Minute
 
-// refreshtokenの有効期限
+// refresh tokenの有効期限
 const refreshTokenTTL = 30 * 24 * time.Hour
 
 // usecaseがValidatorInterfaceに依存する約束
@@ -123,12 +123,12 @@ func NewAuthUsecase(
 }
 
 func (u *AuthUsecase) Register(ctx context.Context, req AuthRegisterRequest) (*AuthRegisterResponse, error) {
-	//入力検証（validatorに寄せる）
+	//入力検証
 	if err := u.validator.ValidateRegister(ctx, req.Email, req.Password); err != nil {
 		return nil, err
 	}
 
-	//パスワードは必ずハッシュ化して保存（平文保存しない）
+	//パスワードは必ずハッシュ化して保存
 	pwHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, ErrInternal
@@ -143,9 +143,8 @@ func (u *AuthUsecase) Register(ctx context.Context, req AuthRegisterRequest) (*A
 		IsActive:     true,
 	}
 
-	//保存（email重複などはrepo/validatorで弾く）
+	//保存
 	if err := u.users.Create(ctx, user); err != nil {
-		// ここで unique 違反を検知できるなら ErrConflict にしたい
 		return nil, ErrConflict
 	}
 
@@ -161,7 +160,10 @@ func (u *AuthUsecase) Register(ctx context.Context, req AuthRegisterRequest) (*A
 }
 
 func (u *AuthUsecase) Login(ctx context.Context, req AuthLoginRequest, userAgent string, ip string) (*LoginResult, error) {
-	// 1) 入力検証
+	// 期限切れ失敗してもログイン自体は止めない）
+	_, _ = u.rtRepo.DeleteExpired(ctx, time.Now())
+
+	//入力検証
 	if err := u.validator.ValidateLogin(ctx, req.Email, req.Password); err != nil {
 		return nil, err
 	}
@@ -182,12 +184,12 @@ func (u *AuthUsecase) Login(ctx context.Context, req AuthLoginRequest, userAgent
 		return nil, ErrUnauthorized
 	}
 
-	//last_login更新
+	//last_login更新（失敗してもログインは継続）
 	now := time.Now()
 	user.LastLoginAt = &now
 	_ = u.users.Update(ctx, user)
 
-	//access token発行（JwtAccessToken）
+	//access token発行
 	accessToken, expiresIn, err := u.issueAccessToken(user)
 	if err != nil {
 		return nil, ErrInternal
@@ -199,24 +201,29 @@ func (u *AuthUsecase) Login(ctx context.Context, req AuthLoginRequest, userAgent
 		return nil, ErrInternal
 	}
 
-	//RefreshTokenモデルにIPを足してここで保存。
-	_ = ip
+	//IP（空なら保存しない）
+	var ipPtr *string
+	if ip != "" {
+		ipCopy := ip
+		ipPtr = &ipCopy
+	}
 
-	rt := &model.RefreshToken{
-		ID:        uuid.NewString(), // refresh token 自体のID
+	rt := model.RefreshToken{
+		ID:        uuid.NewString(),
 		UserID:    user.ID,
 		TokenHash: refreshHash,
 		UserAgent: userAgent,
 		ExpiresAt: time.Now().Add(refreshTokenTTL),
 		UsedAt:    nil,
-		RevokedAt: nil,
+		IP:        ipPtr,
+		CreatedAt: time.Now(),
 	}
 
 	if err := u.rtRepo.Create(ctx, rt); err != nil {
 		return nil, ErrInternal
 	}
 
-	//CSRFtoken
+	//CSRF token
 	csrfPlain, _, err := newRandomTokenAndHash()
 	if err != nil {
 		return nil, ErrInternal
@@ -244,16 +251,6 @@ func (u *AuthUsecase) Login(ctx context.Context, req AuthLoginRequest, userAgent
 	return res, nil
 }
 
-// model.UserをAPI返却用DTOに変換。
-func toUserDTO(u *model.User) UserDTO {
-	return UserDTO{
-		ID:           u.ID,
-		Email:        u.Email,
-		Role:         string(u.Role),
-		TokenVersion: u.TokenVersion,
-		IsActive:     u.IsActive,
-	}
-}
 func (u *AuthUsecase) Me(ctx context.Context, userID int64) (*UserDTO, error) {
 	if userID <= 0 {
 		return nil, ErrUnauthorized
@@ -273,6 +270,9 @@ func (u *AuthUsecase) Me(ctx context.Context, userID int64) (*UserDTO, error) {
 }
 
 func (u *AuthUsecase) Refresh(ctx context.Context, refreshTokenPlain string, userAgent string, ip string) (*RefreshResult, error) {
+	//期限切れ掃除
+	_, _ = u.rtRepo.DeleteExpired(ctx, time.Now())
+
 	//入力検証
 	if err := u.validator.ValidateRefresh(ctx, refreshTokenPlain, userAgent); err != nil {
 		return nil, err
@@ -281,31 +281,29 @@ func (u *AuthUsecase) Refresh(ctx context.Context, refreshTokenPlain string, use
 	//DB照合
 	tokenHash := hashToken(refreshTokenPlain)
 
-	rt, err := u.rtRepo.FindByTokenHash(ctx, tokenHash)
-	if err != nil || rt == nil {
+	rt, found, err := u.rtRepo.FindByHash(ctx, tokenHash)
+	if err != nil {
+		return nil, ErrInternal
+	}
+	if !found {
 		return nil, ErrUnauthorized
 	}
 
-	//期限切れ
+	//期限切れは無効（掃除して401）
 	if rt.ExpiresAt.Before(time.Now()) {
 		_ = u.rtRepo.DeleteByID(ctx, rt.ID)
 		return nil, ErrUnauthorized
 	}
 
-	//revoked
-	if rt.RevokedAt != nil {
-		return nil, ErrUnauthorized
-	}
-
 	//used済みが来たら replay → 全削除
 	if rt.UsedAt != nil {
-		_ = u.rtRepo.DeleteAllByUserID(ctx, rt.UserID)
+		_ = u.rtRepo.DeleteByUserID(ctx, rt.UserID)
 		return nil, ErrSecurityIncident
 	}
 
-	// 6) user_agent違い（再認証扱い。全削除）
+	//user_agent違い → 再認証扱い（全削除）
 	if userAgent != "" && rt.UserAgent != "" && userAgent != rt.UserAgent {
-		_ = u.rtRepo.DeleteAllByUserID(ctx, rt.UserID)
+		_ = u.rtRepo.DeleteByUserID(ctx, rt.UserID)
 		return nil, ErrSecurityIncident
 	}
 
@@ -318,9 +316,9 @@ func (u *AuthUsecase) Refresh(ctx context.Context, refreshTokenPlain string, use
 		return nil, ErrForbidden
 	}
 
-	//旧tokenをusedにする
+	//旧tokenをusedにする（ここが失敗したら全削除→incident）
 	if err := u.rtRepo.MarkUsed(ctx, rt.ID); err != nil {
-		_ = u.rtRepo.DeleteAllByUserID(ctx, rt.UserID)
+		_ = u.rtRepo.DeleteByUserID(ctx, rt.UserID)
 		return nil, ErrSecurityIncident
 	}
 
@@ -330,21 +328,28 @@ func (u *AuthUsecase) Refresh(ctx context.Context, refreshTokenPlain string, use
 		return nil, ErrInternal
 	}
 
-	_ = ip
+	var ipPtr *string
+	if ip != "" {
+		ipCopy := ip
+		ipPtr = &ipCopy
+	}
 
-	newRT := &model.RefreshToken{
+	newRT := model.RefreshToken{
 		ID:        uuid.NewString(),
 		UserID:    user.ID,
 		TokenHash: newHash,
 		UserAgent: userAgent,
 		ExpiresAt: time.Now().Add(refreshTokenTTL),
+		UsedAt:    nil,
+		IP:        ipPtr,
+		CreatedAt: time.Now(),
 	}
 
 	if err := u.rtRepo.Create(ctx, newRT); err != nil {
 		return nil, ErrInternal
 	}
 
-	//access再発行（JwtAccessToken）
+	//access再発行
 	accessToken, expiresIn, err := u.issueAccessToken(user)
 	if err != nil {
 		return nil, ErrInternal
@@ -378,8 +383,11 @@ func (u *AuthUsecase) Logout(ctx context.Context, refreshTokenPlain string) (*Su
 
 	tokenHash := hashToken(refreshTokenPlain)
 
-	rt, err := u.rtRepo.FindByTokenHash(ctx, tokenHash)
-	if err != nil || rt == nil {
+	rt, found, err := u.rtRepo.FindByHash(ctx, tokenHash)
+	if err != nil {
+		return nil, ErrInternal
+	}
+	if !found {
 		return nil, ErrUnauthorized
 	}
 
@@ -404,11 +412,11 @@ func (u *AuthUsecase) ForceLogout(ctx context.Context, targetUserID int64) (*For
 		return nil, ErrInternal
 	}
 
-	if err := u.rtRepo.DeleteAllByUserID(ctx, targetUserID); err != nil {
+	if err := u.rtRepo.DeleteByUserID(ctx, targetUserID); err != nil {
 		return nil, ErrInternal
 	}
 
-	//更新後を取得してnew_token_versionを返す
+	//更新後を取得して new_token_version を返す
 	user, err := u.users.FindByID(ctx, targetUserID)
 	if err != nil || user == nil {
 		return nil, ErrInternal
@@ -463,8 +471,18 @@ func hashToken(plain string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-func toUserDTOOpenAPI(u *model.User) (UserDTO, error) {
+// model.UserをAPI返却用DTOに変換。
+func toUserDTO(u *model.User) UserDTO {
+	return UserDTO{
+		ID:           u.ID,
+		Email:        u.Email,
+		Role:         string(u.Role),
+		TokenVersion: u.TokenVersion,
+		IsActive:     u.IsActive,
+	}
+}
 
+func toUserDTOOpenAPI(u *model.User) (UserDTO, error) {
 	return UserDTO{
 		ID:           u.ID,
 		Email:        u.Email,

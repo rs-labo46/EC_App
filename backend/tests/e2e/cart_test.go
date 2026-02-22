@@ -43,8 +43,9 @@ func Test_Cart_AddDuplicate_Patch_StockExceeded_Delete(t *testing.T) {
 	c := NewTestClient(t)
 	ctx := context.Background()
 	access := adminLogin(t, c, ctx)
+	clearCart(t, c, ctx, access)
 
-	// 事前準備：カート用の商品を作る（stock=5）
+	//事前準備：カート用の商品を作る（stock=5）
 	uniqueName := "E2E-CartBeans-" + time.Now().Format("20060102-150405.000000000")
 	create := ProductCreateRequest{
 		Name:        uniqueName,

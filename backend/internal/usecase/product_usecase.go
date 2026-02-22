@@ -17,12 +17,10 @@ type HTTPError struct {
 	Message string
 }
 
-// Error は Go の error インターフェイスを満たすための文字列化です。
 func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%d: %s", e.Status, e.Message)
 }
 
-// NewHTTPError は HTTPError を作るための関数です。
 func NewHTTPError(status int, message string) error {
 	return &HTTPError{
 		Status:  status,
@@ -30,7 +28,6 @@ func NewHTTPError(status int, message string) error {
 	}
 }
 
-// AsHTTPError は handler で型判定する時に使えるヘルパーです。
 func AsHTTPError(err error) (*HTTPError, bool) {
 	var he *HTTPError
 	ok := errors.As(err, &he)
@@ -40,13 +37,19 @@ func AsHTTPError(err error) (*HTTPError, bool) {
 type ProductUsecase struct {
 	productRepo   repo.ProductRepository
 	inventoryRepo repo.InventoryRepository
+	auditRepo     repo.AuditLogRepository
 }
 
 // DI
-func NewProductUsecase(productRepo repo.ProductRepository, inventoryRepo repo.InventoryRepository) *ProductUsecase {
+func NewProductUsecase(
+	productRepo repo.ProductRepository,
+	inventoryRepo repo.InventoryRepository,
+	auditRepo repo.AuditLogRepository, // ★追加
+) *ProductUsecase {
 	return &ProductUsecase{
 		productRepo:   productRepo,
 		inventoryRepo: inventoryRepo,
+		auditRepo:     auditRepo,
 	}
 }
 
@@ -60,7 +63,6 @@ type ListProductsInput struct {
 	Sort     string
 }
 
-// 一覧レスポンスのDTO
 type ProductListOutput struct {
 	Items []model.Product `json:"items"`
 	Total int64           `json:"total"`
@@ -68,7 +70,6 @@ type ProductListOutput struct {
 	Limit int             `json:"limit"`
 }
 
-// 公開商品の一覧
 func (u *ProductUsecase) ListPublicProducts(ctx context.Context, in ListProductsInput) (ProductListOutput, error) {
 	if in.Page < 1 {
 		return ProductListOutput{}, NewHTTPError(http.StatusBadRequest, "invalid page")
@@ -90,7 +91,6 @@ func (u *ProductUsecase) ListPublicProducts(ctx context.Context, in ListProducts
 	}
 	switch in.Sort {
 	case "", "new", "price_asc", "price_desc":
-		// OK
 	default:
 		return ProductListOutput{}, NewHTTPError(http.StatusBadRequest, "invalid sort")
 	}
@@ -115,7 +115,6 @@ func (u *ProductUsecase) ListPublicProducts(ctx context.Context, in ListProducts
 	}, nil
 }
 
-// 公開商品の詳細
 func (u *ProductUsecase) GetProductDetail(ctx context.Context, productID int64) (model.Product, error) {
 	if productID <= 0 {
 		return model.Product{}, NewHTTPError(http.StatusBadRequest, "invalid product id")
@@ -129,15 +128,12 @@ func (u *ProductUsecase) GetProductDetail(ctx context.Context, productID int64) 
 		return model.Product{}, NewHTTPError(http.StatusInternalServerError, "db error")
 	}
 
-	// 公開商品のみ
 	if !p.IsActive {
 		return model.Product{}, NewHTTPError(http.StatusNotFound, "not found")
 	}
-
 	return p, nil
 }
 
-// POST /admin/productsの入力DTO
 type AdminCreateProductInput struct {
 	Name        string
 	Description string
@@ -146,12 +142,10 @@ type AdminCreateProductInput struct {
 	IsActive    bool
 }
 
-// 管理者の商品作成
 func (u *ProductUsecase) AdminCreateProduct(ctx context.Context, adminUserID int64, in AdminCreateProductInput) (int64, error) {
 	if adminUserID <= 0 {
 		return 0, NewHTTPError(http.StatusUnauthorized, "unauthorized")
 	}
-
 	if strings.TrimSpace(in.Name) == "" {
 		return 0, NewHTTPError(http.StatusBadRequest, "name required")
 	}
@@ -175,11 +169,9 @@ func (u *ProductUsecase) AdminCreateProduct(ctx context.Context, adminUserID int
 	if err != nil {
 		return 0, NewHTTPError(http.StatusInternalServerError, "db error")
 	}
-
 	return p.ID, nil
 }
 
-// 管理者の商品更新
 func (u *ProductUsecase) AdminUpdateProduct(ctx context.Context, adminUserID int64, productID int64, in AdminCreateProductInput) error {
 	if adminUserID <= 0 {
 		return NewHTTPError(http.StatusUnauthorized, "unauthorized")
@@ -212,11 +204,9 @@ func (u *ProductUsecase) AdminUpdateProduct(ctx context.Context, adminUserID int
 	if err != nil {
 		return NewHTTPError(http.StatusInternalServerError, "db error")
 	}
-
 	return nil
 }
 
-// 管理者の商品削除
 func (u *ProductUsecase) AdminDeleteProduct(ctx context.Context, adminUserID int64, productID int64) error {
 	if adminUserID <= 0 {
 		return NewHTTPError(http.StatusUnauthorized, "unauthorized")
@@ -232,11 +222,9 @@ func (u *ProductUsecase) AdminDeleteProduct(ctx context.Context, adminUserID int
 	if err != nil {
 		return NewHTTPError(http.StatusInternalServerError, "db error")
 	}
-
 	return nil
 }
 
-// 在庫の現在値更新＋履歴作成
 func (u *ProductUsecase) AdminUpdateInventory(ctx context.Context, adminUserID int64, productID int64, newStock int64, reason string) error {
 	if adminUserID <= 0 {
 		return NewHTTPError(http.StatusUnauthorized, "unauthorized")
@@ -250,6 +238,8 @@ func (u *ProductUsecase) AdminUpdateInventory(ctx context.Context, adminUserID i
 	if strings.TrimSpace(reason) == "" {
 		return NewHTTPError(http.StatusBadRequest, "reason required")
 	}
+
+	//変更前の在庫（before）
 	p, err := u.productRepo.FindByID(ctx, productID)
 	if err == repo.ErrNotFound {
 		return NewHTTPError(http.StatusNotFound, "not found")
@@ -257,6 +247,9 @@ func (u *ProductUsecase) AdminUpdateInventory(ctx context.Context, adminUserID i
 	if err != nil {
 		return NewHTTPError(http.StatusInternalServerError, "db error")
 	}
+
+	beforeJSON := fmt.Sprintf(`{"stock":%d}`, p.Stock)
+	afterJSON := fmt.Sprintf(`{"stock":%d}`, newStock)
 
 	//在庫の現在値を更新
 	if err := u.inventoryRepo.SetStock(ctx, productID, newStock); err != nil {
@@ -266,7 +259,7 @@ func (u *ProductUsecase) AdminUpdateInventory(ctx context.Context, adminUserID i
 		return NewHTTPError(http.StatusInternalServerError, "db error")
 	}
 
-	//履歴を作成
+	//履歴を作成（差分）
 	adj := model.InventoryAdjustment{
 		ProductID:   productID,
 		AdminUserID: adminUserID,
@@ -274,8 +267,21 @@ func (u *ProductUsecase) AdminUpdateInventory(ctx context.Context, adminUserID i
 		Reason:      strings.TrimSpace(reason),
 		CreatedAt:   time.Now(),
 	}
-
 	if err := u.inventoryRepo.CreateAdjustment(ctx, adj); err != nil {
+		return NewHTTPError(http.StatusInternalServerError, "db error")
+	}
+
+	//監査ログを作成（在庫更新）
+	//「誰が」「何を」「どの対象に」「どう変えたか」を残す
+	if err := u.auditRepo.Create(ctx, model.AuditLog{
+		ActorUserID:  adminUserID,
+		Action:       model.AuditActionUpdateStock,
+		ResourceType: model.AuditResourceProduct,
+		ResourceID:   productID,
+		BeforeJSON:   beforeJSON,
+		AfterJSON:    afterJSON,
+		CreatedAt:    time.Now(),
+	}); err != nil {
 		return NewHTTPError(http.StatusInternalServerError, "db error")
 	}
 

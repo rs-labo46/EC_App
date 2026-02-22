@@ -8,6 +8,7 @@ import (
 	"app/internal/handler"
 	"app/internal/infra/db"
 	infrarepo "app/internal/infra/repository"
+	"app/internal/middleware"
 	"app/internal/usecase"
 	"app/internal/validator"
 
@@ -45,6 +46,10 @@ func main() {
 		&model.InventoryAdjustment{},
 		&model.Cart{},
 		&model.CartItem{},
+		&model.Order{},
+		&model.OrderItem{},
+		&model.Address{},
+		&model.AuditLog{},
 	); err != nil {
 		log.Fatalf("migrate error: %v", err)
 	}
@@ -72,14 +77,29 @@ func main() {
 	authH := handler.NewAuthHandler(cfg, authUC, userRepo)
 	authH.RegisterRoutes(e)
 
+	//Address
+	addrRepo := infrarepo.NewAddressGormRepository(gormDB)
+	addrUC := usecase.NewAddressUsecase(addrRepo)
+	addrHandler := handler.NewAddressHandler(addrUC)
+	authGroup := e.Group(
+		"",
+		middleware.AuthJWT(cfg),
+		middleware.TokenVersionGuard(userRepo),
+	)
+
+	addrHandler.RegisterRoutes(authGroup)
+
 	//Handler(強制ログアウト)
 	adminUserH := handler.NewAdminUserHandler(cfg, userRepo, authUC)
 	adminUserH.RegisterRoutes(e)
 
+	//監査ログ
+	auditRepo := infrarepo.NewAuditLogGormRepository(gormDB)
+
 	// Products
 	productRepo := infrarepo.NewProductGormRepository(gormDB)
 	inventoryRepo := infrarepo.NewInventoryGormRepository(gormDB)
-	productUC := usecase.NewProductUsecase(productRepo, inventoryRepo)
+	productUC := usecase.NewProductUsecase(productRepo, inventoryRepo, auditRepo)
 
 	productH := handler.NewProductHandler(productUC)
 	productH.RegisterRoutes(e)
@@ -93,6 +113,19 @@ func main() {
 	cartUC := usecase.NewCartUsecase(cartRepoImpl, cartRepoImpl, productRepo)
 	cartH := handler.NewCartHandler(cartUC)
 	cartH.RegisterRoutes(e, cfg, userRepo)
+
+	// TxManager
+	txManager := infrarepo.NewTxManagerGorm(gormDB)
+
+	// Orders
+	orderUC := usecase.NewOrderUsecase(txManager, addrRepo)
+	orderH := handler.NewOrderHandler(orderUC)
+	orderH.RegisterRoutes(e, cfg, userRepo)
+
+	//AdminOrder一覧
+	adminOrderUC := usecase.NewAdminOrderUsecase(txManager, auditRepo)
+	adminOrderH := handler.NewAdminOrderHandler(adminOrderUC)
+	adminOrderH.RegisterRoutes(e, cfg, userRepo)
 
 	// サーバ起動
 	log.Fatal(e.Start(":" + cfg.Port))

@@ -78,6 +78,15 @@ type ForceLogoutResponse struct {
 	NewTokenVersion int64 `json:"new_token_version"`
 }
 
+func mustDecodeCartResponse(t *testing.T, body []byte) CartResponse {
+	t.Helper()
+	var v CartResponse
+	if err := json.Unmarshal(body, &v); err != nil {
+		t.Fatalf("json.Unmarshal(CartResponse) failed: %v body=%s", err, string(body))
+	}
+	return v
+}
+
 func (c *TestClient) doJSON(
 	ctx context.Context,
 	t *testing.T,
@@ -188,4 +197,29 @@ func adminLogin(t *testing.T, c *TestClient, ctx context.Context) string {
 	}
 
 	return login.Token.AccessToken
+}
+func clearCart(t *testing.T, c *TestClient, ctx context.Context, access string) {
+	t.Helper()
+
+	// 1) 現在のカートを取得する
+	resp, body := c.doJSON(ctx, t, http.MethodGet, "/cart", access, nil)
+	requireStatus(t, resp, http.StatusOK, body)
+
+	cart := mustDecodeCartResponse(t, body)
+
+	// 2) items が残っている限り、1件ずつ削除する
+	//    （同時に別テストが動かない前提のMVPなので、これで十分）
+	for _, it := range cart.Items {
+		resp, body = c.doJSON(ctx, t, http.MethodDelete, "/cart/"+toStr(it.ID), access, nil)
+		requireStatus(t, resp, http.StatusOK, body)
+	}
+
+	// 3) 最後に空になったことを確認する
+	resp, body = c.doJSON(ctx, t, http.MethodGet, "/cart", access, nil)
+	requireStatus(t, resp, http.StatusOK, body)
+
+	after := mustDecodeCartResponse(t, body)
+	if len(after.Items) != 0 || after.Total != 0 {
+		t.Fatalf("failed to clear cart: body=%s", string(body))
+	}
 }
