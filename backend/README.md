@@ -1,6 +1,6 @@
-# EC Backend (Go + Echo + PostgreSQL + GORM) — MVP
+# EC Backend (Go + Echo + PostgreSQL + GORM)
 
-このリポジトリは、ECプロジェクトの **バックエンドMVP** です。  
+このリポジトリは、ECプロジェクトの **バックエンド** です。  
 仕様書（OpenAPI要件）に合わせて、**認証 / 商品 / 在庫 / カート / 注文 / 管理者操作 / 住所 / 監査ログ** を実装しています。  
 E2Eテスト（curl相当）が通る状態で、ポートフォリオ提出向けに「動く」「読みやすい」「クリーンアーキテクチャの依存方向を守る」を優先しています。
 
@@ -73,7 +73,7 @@ E2Eテスト（curl相当）が通る状態で、ポートフォリオ提出向�
 - internal/middleware # AuthJWT / TokenVersionGuard / AdminRoleGuard / CSRF
 - tests/e2e # E2Eテスト（go test ./tests/e2e）
 
-### クリーンアーキテクチャの依存関係（大事）
+### クリーンアーキテクチャの依存関係
 
 - **usecase は repository(interface) にだけ依存**します
 - GORMの実装は **infra** に置き、usecaseからは見えないようにします
