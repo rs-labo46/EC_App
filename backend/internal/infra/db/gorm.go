@@ -13,7 +13,7 @@ import (
 // DB接続
 func NewGorm(cfg config.Config) (*gorm.DB, error) {
 	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%d sslmode=disable TimeZone=Asia/Tokyo",
+		"host=%s user=%s password=%s dbname=%s port=%d sslmode=disable",
 		cfg.PostgresHost,
 		cfg.PostgresUser,
 		cfg.PostgresPassword,
