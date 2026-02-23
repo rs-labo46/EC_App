@@ -41,6 +41,8 @@ services:
       FE_URL: http://localhost:3000
     ports:
       - "8080:8080"
+    volumes:
+      - ./backend:/app
 
   frontend:
     build:
@@ -52,8 +54,14 @@ services:
       - backend
     environment:
       VITE_API_BASE_URL: http://localhost:8080
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
     ports:
       - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]
 
 volumes:
   pgdata:

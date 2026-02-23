@@ -1,9 +1,10 @@
-// 認証状態（access token + user）をまとめて管理
 import React, {
   createContext,
   useContext,
   useMemo,
   useState,
+  useEffect,
+  useRef,
   type JSX,
 } from "react";
 import {
@@ -38,6 +39,32 @@ export function AuthProvider(props: {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
+  // 初回マウント時に「1回だけ」復元処理を走らせる
+  const bootRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (bootRef.current) return;
+    bootRef.current = true;
+
+    async function bootstrap(): Promise<void> {
+      try {
+        // refresh cookie + CSRF が揃っていれば accessToken が再発行される
+        const token: JwtAccessToken = await authRefresh();
+        setAccessToken(token.access_token);
+
+        // token だけでは user が分からないので /me を叩く
+        const me: User = await getMe(token.access_token);
+        setUser(me);
+      } catch {
+        // refreshできない＝未ログイン扱いでOK
+        setAccessToken(null);
+        setUser(null);
+      }
+    }
+
+    void bootstrap();
+  }, []);
+
   async function login(email: string, password: string): Promise<void> {
     setIsLoading(true);
     try {
@@ -64,21 +91,18 @@ export function AuthProvider(props: {
     }
   }
 
-  //  refreshを呼び、accesstokenを更新する
-
+  // refreshを呼び、accessTokenを更新する
   async function refreshAndSetToken(): Promise<void> {
     setIsLoading(true);
     try {
       const token: JwtAccessToken = await authRefresh();
       setAccessToken(token.access_token);
-      //userは/meで取る
     } finally {
       setIsLoading(false);
     }
   }
 
-  // /me を叩いて user を更新する
-
+  // /meを叩いて user を更新する（401なら refresh→/me 再試行）
   async function fetchMe(): Promise<void> {
     if (!accessToken) return;
 
@@ -88,7 +112,6 @@ export function AuthProvider(props: {
       setUser(me);
       return;
     } catch (e: unknown) {
-      //401ならrefresh→/me再試行
       if (e instanceof ApiError && e.status === 401) {
         try {
           const token = await authRefresh();
@@ -97,7 +120,6 @@ export function AuthProvider(props: {
           setUser(me);
           return;
         } catch {
-          // refresh できないならログアウト扱い
           setAccessToken(null);
           setUser(null);
           return;

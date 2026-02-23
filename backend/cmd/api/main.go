@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net/http"
 
 	"app/internal/config"
 	"app/internal/domain/model"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
+	echomw "github.com/labstack/echo/v4/middleware"
 )
 
 func main() {
@@ -56,6 +58,42 @@ func main() {
 
 	// Echoサーバを起動する
 	e := echo.New()
+
+	// CORS（フロント http://localhost:3000 からのアクセスを許可）
+	// Cookie(refresh)を使うので AllowCredentials を true にする
+	e.Use(echomw.CORSWithConfig(echomw.CORSConfig{
+		AllowOrigins: []string{
+			"http://localhost:3000",
+			"http://127.0.0.1:3000",
+		},
+		AllowMethods: []string{
+			http.MethodGet,
+			http.MethodPost,
+			http.MethodPut,
+			http.MethodPatch,
+			http.MethodDelete,
+			http.MethodOptions,
+		},
+		AllowHeaders: []string{
+			echo.HeaderOrigin,
+			echo.HeaderContentType,
+			echo.HeaderAccept,
+			echo.HeaderAuthorization,
+			"X-CSRF-Token",
+			"X-Idempotency-Key",
+		},
+		AllowCredentials: true,
+	}))
+
+	// preflight(OPTIONS)は認証などに通さず、即204を返す
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if c.Request().Method == http.MethodOptions {
+				return c.NoContent(http.StatusNoContent)
+			}
+			return next(c)
+		}
+	})
 
 	// 疎通確認用エンドポイント
 	e.GET("/health", func(c echo.Context) error {

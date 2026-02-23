@@ -1,12 +1,16 @@
-FROM golang:1.24.4-alpine AS build
+FROM golang:1.24.4-alpine
+
 WORKDIR /app
+
+RUN apk add --no-cache git ca-certificates bash
+
 COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o api ./cmd/api
 
-FROM alpine:3.20
-WORKDIR /app
-COPY --from=build /app/api /app/api
+RUN go install github.com/cosmtrek/air@v1.51.0
+
+COPY . .
+
 EXPOSE 8080
-CMD ["/app/api"]
+
+CMD ["air", "-c", ".air.toml"]

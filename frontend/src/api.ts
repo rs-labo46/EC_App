@@ -227,6 +227,18 @@ async function tryRefresh(): Promise<boolean> {
     return false;
   }
 }
+export type AuthRegisterResponse = { message: string };
+export async function authRegister(
+  email: string,
+  password: string,
+): Promise<AuthRegisterResponse> {
+  return request<AuthRegisterResponse>({
+    method: "POST",
+    path: "/auth/register",
+    jsonBody: { email, password },
+    retryOnUnauthorized: false,
+  });
+}
 
 //用途別API
 export async function authLogin(
