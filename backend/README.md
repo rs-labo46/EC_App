@@ -132,7 +132,8 @@ pgdata:
 サーバを起動したまま、別ターミナルで：
 
 - go clean -testcache
-- BASE_URL=http://127.0.0.1:8080 go test ./tests/e2e -v -count=1
+- go test ./tests/e2e -v
+- go test ./tests/unit -v
 
 ### 動作確認用
 
