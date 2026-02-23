@@ -22,7 +22,10 @@ export default function CartPage() {
   const isEmpty = items.length === 0;
 
   async function load(): Promise<void> {
-    if (!accessToken) return;
+    if (!accessToken) {
+      setCart(null);
+      return;
+    }
 
     setIsLoading(true);
     setError("");
@@ -40,11 +43,23 @@ export default function CartPage() {
 
   useEffect(() => {
     void load();
+    // accessTokenが変わったら再ロード（ログイン/ログアウト/refresh後）
   }, [accessToken]);
 
-  async function onChangeQty(cartItemId: number, qty: number): Promise<void> {
+  function toSafeQty(raw: string): number | null {
+    if (raw.trim() === "") return null;
+    const n: number = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    return n;
+  }
+
+  async function onChangeQty(
+    cartItemId: number,
+    nextQty: number,
+  ): Promise<void> {
     if (!accessToken) return;
-    if (!Number.isFinite(qty) || qty < 1) {
+
+    if (!Number.isFinite(nextQty) || nextQty < 1) {
       setError("数量は1以上にしてください");
       return;
     }
@@ -53,7 +68,7 @@ export default function CartPage() {
     setError("");
 
     try {
-      const c = await updateCartItem(accessToken, cartItemId, qty);
+      const c = await updateCartItem(accessToken, cartItemId, nextQty);
       setCart(c);
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.message : "予期せぬエラー");
@@ -76,6 +91,19 @@ export default function CartPage() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  if (!accessToken) {
+    return (
+      <div style={{ display: "grid", gap: 12 }}>
+        <h2>Cart</h2>
+        <p style={{ opacity: 0.85 }}>カートを見るにはログインが必要です</p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => nav("/login")}>ログインへ</button>
+          <button onClick={() => nav("/")}>商品一覧へ</button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -102,9 +130,11 @@ export default function CartPage() {
                     type="number"
                     min={1}
                     value={it.quantity}
-                    onChange={(e) =>
-                      void onChangeQty(it.id, Number(e.target.value))
-                    }
+                    onChange={(e) => {
+                      const parsed: number | null = toSafeQty(e.target.value);
+                      if (parsed === null) return;
+                      void onChangeQty(it.id, parsed);
+                    }}
                     style={{ width: 70 }}
                     disabled={isSubmitting}
                   />{" "}

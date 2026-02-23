@@ -14,7 +14,7 @@ func Test_UserAuth_LoginMe_ForceLogout_InvalidatesOldAccess(t *testing.T) {
 	ctx := context.Background()
 
 	//管理者でログインしてaccess_tokenを得る
-	loginReq := LoginRequest{Email: "a@example.com", Password: "password123"}
+	loginReq := LoginRequest{Email: "admin@test.com", Password: "password123"}
 	loginJSON, err := json.Marshal(loginReq)
 	if err != nil {
 		t.Fatalf("json.Marshal(LoginRequest) failed: %v", err)

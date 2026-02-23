@@ -21,6 +21,11 @@ export default function NavBar() {
       }}
     >
       <Link to="/">商品</Link>
+
+      {user?.role === "ADMIN" ? (
+        <Link to="/admin/products/new">商品作成</Link>
+      ) : null}
+
       <Link to="/cart">カート</Link>
       <Link to="/addresses">住所</Link>
       <Link to="/orders">注文</Link>

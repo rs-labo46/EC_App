@@ -14,6 +14,7 @@ import { Navigate } from "react-router-dom";
 import { Routes } from "react-router-dom";
 import { Route } from "react-router-dom";
 import NavBar from "./components/NavBar";
+import AdminProductCreatePage from "./pages/AdminProductCreatePage";
 
 function RequireAuth(props: { children: React.ReactNode }) {
   const { accessToken } = useAuth();
@@ -72,6 +73,10 @@ export default function App() {
                 <OrderDetailPage />
               </RequireAuth>
             }
+          />
+          <Route
+            path="/admin/products/new"
+            element={<AdminProductCreatePage />}
           />
 
           <Route path="*" element={<Navigate to="/" replace />} />

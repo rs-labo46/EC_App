@@ -37,7 +37,6 @@ export default function ProductsPage() {
           {data.items.map((p) => (
             <li key={p.id}>
               <Link to={`/products/${p.id}`}>{p.name}</Link> — ¥{p.price}
-              （stock:{p.stock}）
             </li>
           ))}
         </ul>

@@ -179,7 +179,7 @@ func adminLogin(t *testing.T, c *TestClient, ctx context.Context) string {
 	t.Helper()
 
 	//管理者でログインしてaccess_tokenを取得
-	req := LoginRequest{Email: "a@example.com", Password: "password123"}
+	req := LoginRequest{Email: "admin@test.com", Password: "password123"}
 	b, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("json.Marshal(LoginRequest) failed: %v", err)
