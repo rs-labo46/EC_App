@@ -1,0 +1,984 @@
+openapi: 3.0.3
+info:
+  title: EC API Full Spec (Token Version Enabled)
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local dev
+  - url: http://127.0.0.1:8080
+    description: Local dev (IPv6回避)
+  - url: https://api.example.com/api/v1
+    description: Production example
+
+tags:
+  - name: Auth
+  - name: Products
+  - name: Cart
+  - name: Orders
+  - name: Admin
+  - name: Inventory
+  - name: Users
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    CsrfTokenHeader:
+      in: header
+      name: X-CSRF-Token
+      required: true
+      schema:
+        type: string
+      description: Double Submit Cookie方式（csrf_token cookieと同値を送る）
+
+    CsrfTokenCookie:
+      in: cookie
+      name: csrf_token
+      required: true
+      schema:
+        type: string
+      description: Double Submit Cookie方式のCSRFトークン（X-CSRF-Tokenと同値）
+
+    IdempotencyKeyHeader:
+      in: header
+      name: X-Idempotency-Key
+      required: true
+      schema:
+        type: string
+      description: 二重送信防止キー（同じキーなら同じ結果を返す）
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    Success:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    User:
+      type: object
+      required: [id, email, role, token_version, is_active]
+      properties:
+        id:
+          type: integer
+          format: int64
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [USER, ADMIN]
+        token_version:
+          type: integer
+          minimum: 0
+          description: 強制ログアウト用の世代番号（JWTのtvと一致する必要がある）
+        is_active:
+          type: boolean
+
+    JwtAccessToken:
+      type: object
+      required: [access_token, expires_in, token_version]
+      properties:
+        access_token:
+          type: string
+          description: "JWT (claims include: sub=user_id, role, tv=token_version)"
+        expires_in:
+          type: integer
+          description: seconds
+        token_version:
+          type: integer
+          description: 発行時点のtoken_version（JWT内tvと同値）
+
+    AuthLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    AuthLoginResponse:
+      type: object
+      required: [user, token]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        token:
+          $ref: "#/components/schemas/JwtAccessToken"
+
+    Address:
+      type: object
+      required: [id, postal_code, prefecture, city, line1, name, is_default]
+      properties:
+        id:
+          type: integer
+          format: int64
+        postal_code:
+          type: string
+        prefecture:
+          type: string
+        city:
+          type: string
+        line1:
+          type: string
+        line2:
+          type: string
+          nullable: true
+        name:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        is_default:
+          type: boolean
+
+    AddressCreateRequest:
+      type: object
+      required: [postal_code, prefecture, city, line1, name]
+      properties:
+        postal_code:
+          type: string
+        prefecture:
+          type: string
+        city:
+          type: string
+        line1:
+          type: string
+        line2:
+          type: string
+        name:
+          type: string
+        phone:
+          type: string
+
+    AddressUpdateRequest:
+      type: object
+      properties:
+        postal_code:
+          type: string
+        prefecture:
+          type: string
+        city:
+          type: string
+        line1:
+          type: string
+        line2:
+          type: string
+        name:
+          type: string
+        phone:
+          type: string
+
+    AddressList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Address"
+
+    Product:
+      type: object
+      required: [id, name, price, stock, is_active, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: integer
+          description: yen
+        stock:
+          type: integer
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    ProductCreate:
+      type: object
+      required: [name, price, stock]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: integer
+        stock:
+          type: integer
+        is_active:
+          type: boolean
+
+    ProductList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+        total:
+          type: integer
+
+    CartItem:
+      type: object
+      required: [id, product_id, name, price, quantity]
+      properties:
+        id:
+          type: integer
+          format: int64
+        product_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        price:
+          type: integer
+        quantity:
+          type: integer
+          minimum: 1
+
+    CartResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CartItem"
+        total:
+          type: integer
+
+    AddCartRequest:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+        quantity:
+          type: integer
+          minimum: 1
+
+    UpdateCartItemRequest:
+      type: object
+      required: [quantity]
+      properties:
+        quantity:
+          type: integer
+          minimum: 1
+
+    OrderItem:
+      type: object
+      required: [product_id, name, price, quantity]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        price:
+          type: integer
+        quantity:
+          type: integer
+          minimum: 1
+
+    Order:
+      type: object
+      required: [id, user_id, status, total_price, created_at, items]
+      properties:
+        id:
+          type: integer
+          format: int64
+        user_id:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [PENDING, PAID, SHIPPED, CANCELED]
+        total_price:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItem"
+
+    OrderCreateRequest:
+      type: object
+      required: [address_id]
+      properties:
+        address_id:
+          type: integer
+          format: int64
+
+    OrderStatusUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [PENDING, PAID, SHIPPED, CANCELED]
+
+    InventoryUpdate:
+      type: object
+      required: [stock, reason]
+      properties:
+        stock:
+          type: integer
+          minimum: 0
+        reason:
+          type: string
+
+    ForceLogoutResponse:
+      type: object
+      required: [user_id, new_token_version]
+      properties:
+        user_id:
+          type: integer
+          format: int64
+        new_token_version:
+          type: integer
+
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: ログイン（access発行 + refresh cookieセット）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthLoginRequest"
+      responses:
+        "200":
+          description: login success (refresh cookie set)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthLoginResponse"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: access token再発行（refresh cookie + CSRF必須）
+      parameters:
+        - $ref: "#/components/parameters/CsrfTokenHeader"
+        - $ref: "#/components/parameters/CsrfTokenCookie"
+      responses:
+        "200":
+          description: new access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JwtAccessToken"
+        "401":
+          description: invalid refresh / replay detected / token_version mismatch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: ログアウト（refresh失効 + cookie削除）
+      parameters:
+        - $ref: "#/components/parameters/CsrfTokenHeader"
+        - $ref: "#/components/parameters/CsrfTokenCookie"
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: logout success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Success"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /me:
+    get:
+      tags: [Auth]
+      summary: ログイン中ユーザー取得
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /addresses:
+    get:
+      tags: [Users]
+      summary: 住所一覧（本人のみ）
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddressList"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      tags: [Users]
+      summary: 住所作成（本人のみ）
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddressCreateRequest"
+      responses:
+        "200":
+          description: created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Address"
+        "400":
+          description: invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /addresses/{id}:
+    get:
+      tags: [Users]
+      summary: 住所取得（本人のみ）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Address"
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: forbidden (ownership)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      tags: [Users]
+      summary: 住所更新（本人のみ）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddressUpdateRequest"
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Address"
+        "400":
+          description: invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: forbidden (ownership)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      tags: [Users]
+      summary: 住所削除（本人のみ）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Success"
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: forbidden (ownership)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /addresses/{id}/default:
+    post:
+      tags: [Users]
+      summary: デフォルト住所に設定（本人のみ）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: set default
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Success"
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: forbidden (ownership)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /products:
+    get:
+      tags: [Products]
+      summary: 商品一覧（公開商品のみ）
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: min_price
+          schema: { type: integer, minimum: 0 }
+        - in: query
+          name: max_price
+          schema: { type: integer, minimum: 0 }
+        - in: query
+          name: sort
+          schema: { type: string, enum: [new, price_asc, price_desc] }
+      responses:
+        "200":
+          description: list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductList"
+
+  /products/{id}:
+    get:
+      tags: [Products]
+      summary: 商品詳細（公開商品のみ）
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /cart:
+    get:
+      tags: [Cart]
+      summary: カート取得
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: cart
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartResponse"
+
+    post:
+      tags: [Cart]
+      summary: カートに追加（同一商品は数量加算）
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddCartRequest"
+      responses:
+        "200":
+          description: added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartResponse"
+        "400":
+          description: invalid / stock exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /cart/{id}:
+    patch:
+      tags: [Cart]
+      summary: カート明細の数量変更
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCartItemRequest"
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartResponse"
+        "400":
+          description: invalid / stock exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    delete:
+      tags: [Cart]
+      summary: カート明細削除
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartResponse"
+
+  /orders:
+    post:
+      tags: [Orders]
+      summary: 注文確定（トランザクション + 二重送信防止）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderCreateRequest"
+      responses:
+        "200":
+          description: created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          description: invalid / out of stock / idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    get:
+      tags: [Orders]
+      summary: 注文履歴（本人のみ）
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+
+  /orders/{id}:
+    get:
+      tags: [Orders]
+      summary: 注文詳細（本人のみ）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/products:
+    post:
+      tags: [Admin]
+      summary: 商品作成（管理者）
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreate"
+      responses:
+        "200":
+          description: created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Success"
+        "403":
+          description: admin only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /admin/products/{id}:
+    put:
+      tags: [Admin]
+      summary: 商品更新（管理者）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreate"
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Success"
+
+    delete:
+      tags: [Admin]
+      summary: 商品削除（管理者）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Success"
+
+  /admin/inventory/{product_id}:
+    put:
+      tags: [Inventory]
+      summary: 在庫更新（管理者）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: product_id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryUpdate"
+      responses:
+        "200":
+          description: stock updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Success"
+
+  /admin/orders:
+    get:
+      tags: [Admin]
+      summary: 注文一覧（管理者）
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+
+  /admin/orders/{id}/status:
+    put:
+      tags: [Admin]
+      summary: 注文ステータス更新（管理者）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderStatusUpdate"
+      responses:
+        "200":
+          description: updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Success"
+
+  /admin/users/{id}/force-logout:
+    post:
+      tags: [Users]
+      summary: 強制ログアウト（token_version++ + refresh全削除）
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: forced logout completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForceLogoutResponse"
+        "403":
+          description: admin only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
