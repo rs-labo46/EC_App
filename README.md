@@ -1,6 +1,7 @@
-# EC Backend (Go + Echo + PostgreSQL + GORM)
+ECプロジェクトの **バックエンド** と **フロントエンド** をまとめたものです。  
+仕様書（OpenAPI要件）に合わせて、**認証 / 商品 / 在庫 / カート / 注文 / 管理者操作 / 住所 / 監査ログ** を実装しています。
 
-## 仕様書（OpenAPI要件）に合わせて、**認証 / 商品 / 在庫 / カート / 注文 / 管理者操作 / 住所 / 監査ログ** を実装。
+# EC Backend (Go + Echo + PostgreSQL + GORM)
 
 ## 技術スタック
 
@@ -19,7 +20,7 @@
 
 ### 認証（Auth）
 
-- Register（※OASには後で追記予定）
+- Register（ユーザー登録）
 - Login（access token発行 + refresh cookie set）
 - Refresh（refresh回転 + CSRF必須 + 再利用検知）
 - Logout（CSRF必須 + bearer必須）
@@ -80,43 +81,36 @@
 
 ## 起動方法
 
+EC_App/ec ディレクトリで実行です。
 docker compose up --build
-
-### 2 DBを起動（Docker Compose）
-
-docker compose up --build
-
-### DBを起動（Docker Compose）
-
-- docker compose up -d
-- docker ps
-
-### Backendを起動
-
-- cd backend
-- go run ./cmd/api
-
-- curl -i http://localhost:8080/health
-
-# 200 ok
 
 ## E2E テスト
 
 サーバを起動したまま、別ターミナルで：
+cd backend
 
 - go clean -testcache
 - go test ./tests/e2e -v
 - go test ./tests/unit -v
 
-## Register（開発用）
+## Register（ユーザー登録）
+
+※Registerはユーザー作成のみです。**access token / refresh cookie / csrf cookie は発行されません**。  
+続けて `/auth/login` を実行してログインしてください。
 
 curl -i -X POST http://localhost:8080/auth/register \
  -H "Content-Type: application/json" \
  -d '{"email":"user1@test.com","password":"CorrectPW123!"}'
-Login（refresh cookie + csrf cookie を受け取る）
+
+## Login（access token発行 + refresh cookie + csrf cookie）
+
 curl -i -c cookies.txt -X POST http://localhost:8080/auth/login \
  -H "Content-Type: application/json" \
  -d '{"email":"user1@test.com","password":"CorrectPW123!"}'
+
+# loginレスポンス(JSON)の token.access_token を $ACCESS に入れる
+
+# 例: ACCESS="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 
 ## Me（bearer必須）
 
@@ -187,8 +181,6 @@ curl -i -b cookies.txt -c cookies.txt -X POST http://localhost:8080/auth/logout 
 
 # EC Frontend (React + Vite + TypeScript)
 
-仕様書（OpenAPI要件）に合わせて、**認証 / 商品 / カート / 注文 / 住所 / 管理者操作** の画面とAPI連携を実装。
-
 ## 技術スタック
 
 - React
@@ -206,7 +198,8 @@ curl -i -b cookies.txt -c cookies.txt -X POST http://localhost:8080/auth/logout 
 - Login（access token取得 + refresh cookie set + csrf cookie set）
 - Refresh（refresh回転 + CSRF必須 + 再利用検知）
 - Logout（CSRF必須 + refresh失効）
-- /me（bearer必須 + token_version一致必須）※backend側実装に合わせる - - Force Logout（admin only / token_version++ による既存JWT無効化）
+- /me（bearer必須 + token_version一致必須）※backend側実装に合わせる
+- Force Logout（admin only / token_version++ による既存JWT無効化）
 
 ### 商品（Products）
 
@@ -252,7 +245,8 @@ curl -i -b cookies.txt -c cookies.txt -X POST http://localhost:8080/auth/logout 
     - OrderDetail.tsx
     - ProductDetail.tsx
     - Product.tsx
-
+  - ui/
+    - styles.ts
   - components/
     - NavBar.tsx
   - api/
@@ -266,4 +260,5 @@ curl -i -b cookies.txt -c cookies.txt -X POST http://localhost:8080/auth/logout 
 
 ## 起動方法
 
+EC_App/ec ディレクトリで実行です。
 docker compose up --build
