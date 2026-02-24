@@ -194,6 +194,28 @@ function pickAction() {
   return MIX[MIX.length - 1].name;
 }
 
+//register helper
+function tryRegister(email, password) {
+  const payload = JSON.stringify({ email, password });
+
+  // register は cookie 不要なので jarなしでOK（実装により不要なら付けても害は少ない）
+  const res = http.post(`${BASE_URL}/auth/register`, payload, {
+    headers: { "Content-Type": "application/json" },
+    tags: { name: "AUTH_register" },
+  });
+
+  // 実装差を吸収：201/200/204 あたりを許容（409は既存ユーザー）
+  check(res, {
+    "register 200/201/204/409": (r) =>
+      r.status === 200 ||
+      r.status === 201 ||
+      r.status === 204 ||
+      r.status === 409,
+  });
+
+  return res.status;
+}
+
 // =====================
 // login：/auth/login
 // - access token は JSON の token.access_token
@@ -205,15 +227,28 @@ function loginAndGetContext() {
   const email = pickUserEmail();
   const payload = JSON.stringify({ email, password: USER_PASSWORD });
 
-  const res = http.post(`${BASE_URL}/auth/login`, payload, {
+  // 1回目 login
+  let res = http.post(`${BASE_URL}/auth/login`, payload, {
     headers: { "Content-Type": "application/json" },
     jar,
     tags: { name: "AUTH_login" },
   });
 
-  const ok = check(res, { "login 200": (r) => r.status === 200 });
-  if (!ok) return { ok: false, jar, access: "", csrf: "" };
+  // login が落ちたら、1回だけ register して再login
+  if (res.status !== 200) {
+    tryRegister(email, USER_PASSWORD);
 
+    res = http.post(`${BASE_URL}/auth/login`, payload, {
+      headers: { "Content-Type": "application/json" },
+      jar,
+      tags: { name: "AUTH_login" },
+    });
+  }
+
+  const okStatus = check(res, { "login 200": (r) => r.status === 200 });
+  if (!okStatus) return { ok: false, jar, access: "", csrf: "" };
+
+  // access token 取得（token.access_token 前提）
   let access = "";
   try {
     const b = res.json();
@@ -222,11 +257,18 @@ function loginAndGetContext() {
     }
   } catch (_e) {}
 
+  // csrf cookie 取得
   let csrf = "";
   const cookies = jar.cookiesForURL(BASE_URL);
   if (cookies && cookies[COOKIE_CSRF] && cookies[COOKIE_CSRF].length > 0) {
     csrf = cookies[COOKIE_CSRF][0].value;
   }
+
+  // “200だけど中身空” を弾く（ここが超重要：後続の401ノイズを防ぐ）
+  const okPayload = access !== "" && csrf !== "";
+  check({ access, csrf }, { "login has access+csrf": () => okPayload });
+
+  if (!okPayload) return { ok: false, jar, access: "", csrf: "" };
 
   return { ok: true, jar, access, csrf };
 }
@@ -277,16 +319,38 @@ function lt4CartAdd(auth, productId) {
   });
 }
 
-function lt5OrdersPlace(auth) {
-  // OrderHandler: idempotency は Header "X-Idempotency-Key"
-  const key = `${exec.vu.idInTest}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function lt5OrdersPlace(auth, productId) {
+  // 1) まずカートに入れる（空カート注文による 400 を消す）
+  const addPayload = JSON.stringify({ product_id: productId, quantity: 1 });
 
-  const payload = JSON.stringify({
-    address_id: ADDRESS_ID,
-    idempotency_key: key,
+  const addRes = http.post(`${BASE_URL}/cart`, addPayload, {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${auth.access}`,
+    },
+    jar: auth.jar,
+    tags: { name: "LT5_orders_place" },
   });
 
-  const res = http.post(`${BASE_URL}/orders`, payload, {
+  // ここは「成功させたい」ので 200 を狙う（在庫がないなら productId 選びが必要）
+  const addOk = check(addRes, { "LT5 cart_add 200": (r) => r.status === 200 });
+  if (!addOk) {
+    // 在庫切れ等のときは、この回は注文まで行かずに戻る（4xx増やさないため）
+    // ※ログは必要なら追加
+    return;
+  }
+
+  // 2) 注文
+  const key = `${exec.vu.idInTest}-${Date.now()}-${Math.random()
+    .toString(16)
+    .slice(2)}`;
+
+  const orderPayload = JSON.stringify({
+    address_id: ADDRESS_ID,
+    idempotency_key: key, // handlerは見ないが一応残してOK
+  });
+
+  const res = http.post(`${BASE_URL}/orders`, orderPayload, {
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${auth.access}`,
@@ -296,25 +360,33 @@ function lt5OrdersPlace(auth) {
     tags: { name: "LT5_orders_place" },
   });
 
-  // cart empty / out of stock / conflict 等を許容
-  check(res, {
-    "LT5 200/400/409": (r) =>
-      r.status === 200 || r.status === 400 || r.status === 409,
-  });
+  const ok = check(res, { "LT5 200": (r) => r.status === 200 });
+  if (!ok) logLt5Failure(res);
+}
+let __lt5LogCount = 0;
+
+function logLt5Failure(res) {
+  if (__lt5LogCount >= 3) return;
+  __lt5LogCount++;
+
+  console.log(
+    `[LT5 fail] status=${res.status} body=${String(res.body).slice(0, 300)}`,
+  );
 }
 
 function lt6AuthRefresh(auth) {
-  // AuthHandler: Double Submit CSRF
-  // header X-CSRF-Token と cookie csrf_token が一致しないと 401
   const res = http.post(`${BASE_URL}/auth/refresh`, null, {
-    headers: {
-      [HEADER_CSRF]: auth.csrf || "",
-    },
+    headers: { [HEADER_CSRF]: auth.csrf },
     jar: auth.jar,
     tags: { name: "LT6_auth_refresh" },
   });
 
-  check(res, { "LT6 200/401": (r) => r.status === 200 || r.status === 401 });
+  const ok = check(res, { "LT6 200": (r) => r.status === 200 });
+  if (!ok) {
+    console.log(
+      `[LT6 fail] status=${res.status} body=${String(res.body).slice(0, 300)}`,
+    );
+  }
 }
 
 // =====================
@@ -359,7 +431,7 @@ export default function (data) {
       lt4CartAdd(globalThis.__authCtx, productId);
       break;
     case "LT5_orders_place":
-      lt5OrdersPlace(globalThis.__authCtx);
+      lt5OrdersPlace(globalThis.__authCtx, productId);
       break;
     case "LT6_auth_refresh":
       lt6AuthRefresh(globalThis.__authCtx);
