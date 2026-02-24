@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiError, listOrders, type Order } from "../api";
 import { useAuth } from "../auth";
 import { Link } from "react-router-dom";
+import { ui } from "../ui/styles";
 
 export default function OrdersPage() {
   const { accessToken } = useAuth();
@@ -29,21 +30,33 @@ export default function OrdersPage() {
   }, [accessToken]);
 
   return (
-    <div>
-      <h2>Orders</h2>
-      {error ? <p style={{ color: "tomato" }}>{error}</p> : null}
-      {!orders ? (
-        <p>loading...</p>
-      ) : (
-        <ul>
-          {orders.map((o) => (
-            <li key={o.id}>
-              <Link to={`/orders/${o.id}`}>#{o.id}</Link> — {o.status} — ¥
-              {o.total_price}
-            </li>
-          ))}
-        </ul>
-      )}
+    <div style={ui.page}>
+      <div style={ui.header}>
+        <h2 style={ui.title}>Orders</h2>
+        <p style={ui.subtitle}>過去の注文を確認できます。</p>
+      </div>
+
+      <div style={ui.cardWide}>
+        {error ? <p style={ui.msgErr}>{error}</p> : null}
+
+        {!orders ? (
+          <p style={ui.hint}>loading...</p>
+        ) : orders.length === 0 ? (
+          <p style={ui.hint}>注文はまだありません。</p>
+        ) : (
+          <div style={ui.grid}>
+            {orders.map((o) => (
+              <div key={o.id} style={ui.productCard}>
+                <p style={ui.productName}>
+                  <Link to={`/orders/${o.id}`}>#{o.id}</Link>
+                </p>
+                <div style={ui.hint}>ステータス: {o.status}</div>
+                <div style={ui.price}>¥{o.total_price}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

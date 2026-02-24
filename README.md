@@ -1,10 +1,6 @@
 # EC Backend (Go + Echo + PostgreSQL + GORM)
 
-このリポジトリは、ECプロジェクトの **バックエンド** です。  
-仕様書（OpenAPI要件）に合わせて、**認証 / 商品 / 在庫 / カート / 注文 / 管理者操作 / 住所 / 監査ログ** を実装しています。  
-E2Eテスト（curl相当）が通る状態で、ポートフォリオ提出向けに「動く」「読みやすい」「クリーンアーキテクチャの依存方向を守る」を優先しています。
-
----
+## 仕様書（OpenAPI要件）に合わせて、**認証 / 商品 / 在庫 / カート / 注文 / 管理者操作 / 住所 / 監査ログ** を実装。
 
 ## 技術スタック
 
@@ -40,14 +36,14 @@ E2Eテスト（curl相当）が通る状態で、ポートフォリオ提出向�
 ### カート（Cart）
 
 - ACTIVEカートはユーザーにつき最大1
-- 追加（同一商品は数量加算、在庫超過は400）
+- 追加（同一商品は数量加算）
 - 更新（cart_item.id）
 - 削除
 
 ### 注文（Orders）
 
 - 注文作成（Tx + idempotency_key 二重送信防止 + 在庫減算 + カートクリア）
-- address_id 必須 + 所有チェック（他人の住所は403、存在しない住所は404）
+- address_id 必須 + 所有チェック
 - 注文一覧/詳細（本人のみ）
 
 ### 管理者注文（Admin Orders）
@@ -60,7 +56,7 @@ E2Eテスト（curl相当）が通る状態で、ポートフォリオ提出向�
 
 ---
 
-## ディレクトリ構成（ざっくり）
+## ディレクトリ構成
 
 - cmd/api/main.go # エントリポイント（DI, AutoMigrate, ルート登録）
 - internal/config # env読み込み
@@ -71,47 +67,24 @@ E2Eテスト（curl相当）が通る状態で、ポートフォリオ提出向�
 - internal/usecase # ビジネスロジック（Tx・所有チェック・状態遷移ガード等）
 - internal/handler # HTTP（入力/出力・ステータス変換・ルーティング）
 - internal/middleware # AuthJWT / TokenVersionGuard / AdminRoleGuard / CSRF
-- tests/e2e # E2Eテスト（go test ./tests/e2e）
+- tests/e2e # E2Eテスト
+- tests/unit # 単体テスト
 
 ### クリーンアーキテクチャの依存関係
 
 - **usecase は repository(interface) にだけ依存**します
 - GORMの実装は **infra** に置き、usecaseからは見えないようにします
-- handler は usecase を呼びます（HTTPの入出力の変換担当）
+- handler は usecase を呼びます
 
 ---
 
 ## 起動方法
 
-### 1 .env を作る（backend直下）
-
-PORT=8080
-POSTGRES_USER=myuser
-POSTGRES_PASSWORD=mypassword
-POSTGRES_DB=mydb
-POSTGRES_PORT=5433
-POSTGRES_HOST=localhost
-JWT_SECRET=mysecret
-GO_ENV=dev
-API_DOMAIN=localhost
-FE_URL=http://localhost:3000
+docker compose up --build
 
 ### 2 DBを起動（Docker Compose）
 
-`docker-compose.yml`（DB）は例えば以下：
-
-services:
-db:
-image: postgres
-restart: always
-environment:
-POSTGRES_USER: myuser
-POSTGRES_PASSWORD: mypassword
-POSTGRES_DB: mydb
-ports: - "5433:5432"
-volumes: - pgdata:/var/lib/postgresql
-volumes:
-pgdata:
+docker compose up --build
 
 ### DBを起動（Docker Compose）
 
@@ -134,8 +107,6 @@ pgdata:
 - go clean -testcache
 - go test ./tests/e2e -v
 - go test ./tests/unit -v
-
-### 動作確認用
 
 ## Register（開発用）
 
@@ -213,3 +184,86 @@ curl -i -b cookies.txt -c cookies.txt -X POST http://localhost:8080/auth/logout 
    -H "Authorization: Bearer $ACCESS" \
    -H "Content-Type: application/json" \
    -d '{"status":"SHIPPED"}'
+
+# EC Frontend (React + Vite + TypeScript)
+
+仕様書（OpenAPI要件）に合わせて、**認証 / 商品 / カート / 注文 / 住所 / 管理者操作** の画面とAPI連携を実装。
+
+## 技術スタック
+
+- React
+- Vite
+- TypeScript
+- Fetch
+- Docker Compose
+
+---
+
+## できること（機能一覧）
+
+### 認証（Auth）
+
+- Login（access token取得 + refresh cookie set + csrf cookie set）
+- Refresh（refresh回転 + CSRF必須 + 再利用検知）
+- Logout（CSRF必須 + refresh失効）
+- /me（bearer必須 + token_version一致必須）※backend側実装に合わせる - - Force Logout（admin only / token_version++ による既存JWT無効化）
+
+### 商品（Products）
+
+- 公開商品一覧（検索・ページング・ソート）
+- 公開商品詳細
+
+### カート（Cart）※ログイン必須
+
+- カート取得
+- 追加（同一商品は数量加算 / 在庫超過は禁止）
+- 数量変更
+- 削除
+
+### 注文（Orders）※ログイン必須
+
+- 注文確定（address_id 必須 + Idempotency-Key 必須）
+- 注文一覧/詳細（本人のみ）
+
+### 住所（Addresses）※ログイン必須
+
+- 住所作成 / 一覧 / 更新 / 削除 / default切替
+
+### 管理者（Admin）※ADMIN必須
+
+- 商品CRUD / 公開切替
+- 在庫調整（理由必須、履歴あり）
+- 注文一覧/ステータス更新（遷移ルールあり）
+- ユーザー一覧/権限/停止/強制ログアウト
+
+---
+
+## ディレクトリ構成
+
+- src/
+  - pages/
+    - Address.tsx
+    - AdminProductCreatePage.tsx
+    - Cart.tsx
+    - Checkout.tsx
+    - Signup.tsx
+    - Login.tsx
+    - Order.tsx
+    - OrderDetail.tsx
+    - ProductDetail.tsx
+    - Product.tsx
+
+  - components/
+    - NavBar.tsx
+  - api/
+  - auth/
+  - types/
+  - api.ts
+  - auth.ts
+  - App.tsx
+
+---
+
+## 起動方法
+
+docker compose up --build

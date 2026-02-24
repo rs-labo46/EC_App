@@ -9,6 +9,7 @@ import {
   type Product,
 } from "../api";
 import { useAuth } from "../auth";
+import { ui } from "../ui/styles";
 
 function toNumber(raw: string): number | null {
   if (raw.trim() === "") return null;
@@ -132,88 +133,135 @@ export default function AdminProductCreatePage() {
 
   if (isChecking) {
     return (
-      <div style={{ display: "grid", gap: 12 }}>
-        <h2>管理者の商品作成ページです</h2>
-        <p>checking...</p>
+      <div style={ui.page}>
+        <div style={ui.header}>
+          <h2 style={ui.title}>管理者の商品作成ページです</h2>
+          <p style={ui.subtitle}>権限を確認しています。</p>
+        </div>
+        <div style={ui.card}>
+          <p style={ui.hint}>checking...</p>
+        </div>
       </div>
     );
   }
 
   if (!isAdmin) {
     return (
-      <div style={{ display: "grid", gap: 12 }}>
-        <h2>管理者の商品作成ページです</h2>
-        {error ? <p style={{ color: "tomato" }}>{error}</p> : null}
-        <button onClick={() => nav("/")}>トップへ戻る</button>
+      <div style={ui.page}>
+        <div style={ui.header}>
+          <h2 style={ui.title}>管理者の商品作成ページです</h2>
+          <p style={ui.subtitle}>管理者のみアクセスできます。</p>
+        </div>
+
+        <div style={ui.card}>
+          {error ? <p style={ui.msgErr}>{error}</p> : null}
+          <button style={ui.buttonPrimary} onClick={() => nav("/")}>
+            トップへ戻る
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ display: "grid", gap: 12, maxWidth: 520 }}>
-      <h2>商品作成</h2>
+    <div style={ui.page}>
+      <div style={ui.header}>
+        <h2 style={ui.title}>商品作成</h2>
+        <p style={ui.subtitle}>
+          商品名・説明・価格・在庫・公開設定を登録します。
+        </p>
+      </div>
 
-      {error ? <p style={{ color: "tomato" }}>{error}</p> : null}
-      {msg ? <p style={{ color: "lime" }}>{msg}</p> : null}
+      <div style={ui.cardWide}>
+        {error ? <p style={ui.msgErr}>{error}</p> : null}
+        {msg ? <p style={ui.msgOk}>{msg}</p> : null}
 
-      <label style={{ display: "grid", gap: 4 }}>
-        <span>商品名</span>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          disabled={isSubmitting}
-        />
-      </label>
+        <div style={{ display: "grid", gap: 12, maxWidth: 520 }}>
+          <label style={ui.label}>
+            商品名
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={isSubmitting}
+              style={ui.input}
+            />
+          </label>
 
-      <label style={{ display: "grid", gap: 4 }}>
-        <span>商品説明</span>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={4}
-          disabled={isSubmitting}
-        />
-      </label>
+          <label style={ui.label}>
+            商品説明
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+              disabled={isSubmitting}
+              style={{ ...ui.input, resize: "vertical" }}
+            />
+          </label>
 
-      <label style={{ display: "grid", gap: 4 }}>
-        <span>価格</span>
-        <input
-          type="number"
-          min={0}
-          value={priceRaw}
-          onChange={(e) => setPriceRaw(e.target.value)}
-          disabled={isSubmitting}
-        />
-      </label>
+          <label style={ui.label}>
+            価格
+            <input
+              type="number"
+              min={0}
+              value={priceRaw}
+              onChange={(e) => setPriceRaw(e.target.value)}
+              disabled={isSubmitting}
+              style={ui.input}
+            />
+          </label>
 
-      <label style={{ display: "grid", gap: 4 }}>
-        <span>数量</span>
-        <input
-          type="number"
-          min={0}
-          value={stockRaw}
-          onChange={(e) => setStockRaw(e.target.value)}
-          disabled={isSubmitting}
-        />
-      </label>
+          <label style={ui.label}>
+            数量
+            <input
+              type="number"
+              min={0}
+              value={stockRaw}
+              onChange={(e) => setStockRaw(e.target.value)}
+              disabled={isSubmitting}
+              style={ui.input}
+            />
+          </label>
 
-      <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input
-          type="checkbox"
-          checked={isActive}
-          onChange={(e) => setIsActive(e.target.checked)}
-          disabled={isSubmitting}
-        />
-        <span>公開する</span>
-      </label>
+          <label
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              color: "rgba(255,255,255,0.80)",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={isActive}
+              onChange={(e) => setIsActive(e.target.checked)}
+              disabled={isSubmitting}
+            />
+            公開する
+          </label>
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={() => void onSubmit()} disabled={!canSubmit}>
-          作成
-        </button>
-        <button onClick={() => nav("/products")} disabled={isSubmitting}>
-          戻る
-        </button>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              onClick={() => void onSubmit()}
+              disabled={!canSubmit}
+              style={{
+                ...ui.buttonPrimary,
+                ...(!canSubmit ? ui.buttonPrimaryDisabled : null),
+              }}
+            >
+              作成
+            </button>
+            <button
+              onClick={() => nav("/products")}
+              disabled={isSubmitting}
+              style={{
+                ...ui.buttonPrimary,
+                ...(isSubmitting ? ui.buttonPrimaryDisabled : null),
+              }}
+            >
+              戻る
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

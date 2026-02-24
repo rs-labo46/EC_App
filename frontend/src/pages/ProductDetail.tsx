@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiError, addToCart, getProduct, type Product } from "../api";
 import { useAuth } from "../auth";
+import { ui } from "../ui/styles";
 
 function clamp(n: number, min: number, max: number): number {
   if (n < min) return min;
@@ -112,54 +113,71 @@ export default function ProductDetailPage() {
     !!accessToken && !!product && product.stock > 0 && !isSubmitting;
 
   return (
-    <div>
-      <h2>商品詳細</h2>
+    <div style={ui.page}>
+      <div style={ui.header}>
+        <h2 style={ui.title}>商品詳細</h2>
+        <p style={ui.subtitle}>数量を選んでカートに追加できます。</p>
+      </div>
 
-      {error ? <p style={{ color: "tomato" }}>{error}</p> : null}
-      {msg ? <p style={{ color: "lime" }}>{msg}</p> : null}
+      <div style={ui.cardWide}>
+        {error ? <p style={ui.msgErr}>{error}</p> : null}
+        {msg ? <p style={ui.msgOk}>{msg}</p> : null}
 
-      {!product ? (
-        <p>loading...</p>
-      ) : (
-        <div style={{ display: "grid", gap: 8, maxWidth: 520 }}>
-          <div>
-            <b>{product.name}</b>
+        {!product ? (
+          <p style={ui.hint}>loading...</p>
+        ) : (
+          <div style={{ display: "grid", gap: 10, maxWidth: 520 }}>
+            <div>
+              <div style={{ ...ui.productName, fontSize: 18 }}>
+                {product.name}
+              </div>
+              <div style={ui.price}>¥{product.price}</div>
+            </div>
+
+            <div style={{ color: "rgba(255,255,255,0.78)", lineHeight: 1.7 }}>
+              {product.description}
+            </div>
+
+            <div style={ui.metaRow}>
+              <select
+                value={qty}
+                onChange={(e) => {
+                  const parsed: number | null = parseQty(e.target.value);
+                  if (parsed === null) return;
+                  setQty(clamp(parsed, 1, maxQty));
+                }}
+                disabled={product.stock <= 0 || isSubmitting}
+                style={{ ...ui.select, width: 110 }}
+              >
+                {qtyOptions.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={() => void onAdd()}
+                disabled={!canAdd}
+                style={{
+                  ...ui.buttonPrimary,
+                  ...(!canAdd ? ui.buttonPrimaryDisabled : null),
+                }}
+              >
+                カートに追加
+              </button>
+
+              <span style={ui.hint}>
+                {!accessToken
+                  ? "ログイン必須"
+                  : product.stock <= 0
+                    ? "在庫切れ"
+                    : `在庫: ${product.stock}`}
+              </span>
+            </div>
           </div>
-          <div>¥{product.price}</div>
-          <div style={{ opacity: 0.9 }}>{product.description}</div>
-
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <select
-              value={qty}
-              onChange={(e) => {
-                const parsed: number | null = parseQty(e.target.value);
-                if (parsed === null) return;
-                setQty(clamp(parsed, 1, maxQty));
-              }}
-              disabled={product.stock <= 0 || isSubmitting}
-              style={{ width: 80 }}
-            >
-              {qtyOptions.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-
-            <button onClick={() => void onAdd()} disabled={!canAdd}>
-              カートに追加
-            </button>
-
-            <span style={{ opacity: 0.8, fontSize: 12 }}>
-              {!accessToken
-                ? "ログイン必須"
-                : product.stock <= 0
-                  ? "在庫切れ"
-                  : ""}
-            </span>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
   type CartResponse,
 } from "../api";
 import { useAuth } from "../auth";
+import { ui } from "../ui/styles";
 
 function isAddressList(value: unknown): value is AddressList {
   if (typeof value !== "object" || value === null) return false;
@@ -148,107 +149,143 @@ export default function CheckoutPage() {
 
   if (!accessToken) {
     return (
-      <div style={{ display: "grid", gap: 12, maxWidth: 560 }}>
-        <h2>会計</h2>
-        <p style={{ color: "tomato" }}>ログインが必要です</p>
+      <div style={ui.page}>
+        <div style={ui.header}>
+          <h2 style={ui.title}>会計</h2>
+          <p style={ui.subtitle}>注文を確定するにはログインが必要です。</p>
+        </div>
+
+        <div style={ui.card}>
+          <p style={ui.msgErr}>ログインが必要です</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ display: "grid", gap: 12, maxWidth: 560 }}>
-      <h2>会計</h2>
+    <div style={ui.page}>
+      <div style={ui.header}>
+        <h2 style={ui.title}>会計</h2>
+        <p style={ui.subtitle}>注文内容と配送先を確認して確定します。</p>
+      </div>
 
-      {error ? <p style={{ color: "tomato" }}>{error}</p> : null}
-      {msg ? <p style={{ color: "lime" }}>{msg}</p> : null}
+      <div style={ui.cardWide}>
+        {error ? <p style={ui.msgErr}>{error}</p> : null}
+        {msg ? <p style={ui.msgOk}>{msg}</p> : null}
 
-      {isLoading && (!addresses || !cart) ? <p>loading...</p> : null}
+        {isLoading && (!addresses || !cart) ? (
+          <p style={ui.hint}>loading...</p>
+        ) : null}
 
-      {/* カート明細 */}
-      {cart ? (
-        <div
-          style={{
-            display: "grid",
-            gap: 8,
-            padding: 12,
-            border: "1px solid #ddd",
-          }}
-        >
-          <b>注文内容</b>
+        {cart ? (
+          <div style={ui.productCard}>
+            <div style={{ ...ui.productName, marginBottom: 8 }}>注文内容</div>
 
-          {isCartEmpty ? (
-            <p style={{ opacity: 0.85 }}>カートが空です</p>
-          ) : (
-            <div style={{ display: "grid", gap: 6 }}>
-              <ul style={{ margin: 0, paddingLeft: 18 }}>
-                {cartItems.map((it) => {
-                  const lineTotal: number = it.price * it.quantity;
-                  return (
-                    <li key={it.id}>
-                      {it.name} × {it.quantity}（{formatYen(it.price)}）＝{" "}
-                      {formatYen(lineTotal)}
-                    </li>
-                  );
-                })}
-              </ul>
+            {isCartEmpty ? (
+              <p style={ui.hint}>カートが空です</p>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {cartItems.map((it) => {
+                    const lineTotal: number = it.price * it.quantity;
+                    return (
+                      <div
+                        key={it.id}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 12,
+                          padding: "10px 12px",
+                          borderRadius: 12,
+                          border: "1px solid rgba(255,255,255,0.10)",
+                          background: "rgba(0,0,0,0.18)",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 800 }}>{it.name}</div>
+                          <div style={ui.hint}>
+                            {it.quantity}個（{formatYen(it.price)}）
+                          </div>
+                        </div>
+                        <div style={{ fontWeight: 900 }}>
+                          {formatYen(lineTotal)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
 
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>
-                  <b>合計</b>
-                </span>
-                <span>
-                  <b>{formatYen(cart.total)}</b>
-                </span>
+                <div
+                  style={{ display: "flex", justifyContent: "space-between" }}
+                >
+                  <span style={{ fontWeight: 900 }}>合計</span>
+                  <span style={{ fontWeight: 900 }}>
+                    {formatYen(cart.total)}
+                  </span>
+                </div>
               </div>
+            )}
+          </div>
+        ) : null}
+
+        {addresses ? (
+          <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+            <div style={ui.productCard}>
+              <div style={{ ...ui.productName, marginBottom: 8 }}>配送先</div>
+
+              <label style={ui.label}>
+                住所
+                <select
+                  value={selectedId ?? ""}
+                  onChange={(e) =>
+                    setSelectedId(
+                      e.target.value ? Number(e.target.value) : null,
+                    )
+                  }
+                  style={ui.select}
+                  disabled={isSubmitting}
+                >
+                  <option value="">(select)</option>
+                  {addressItems.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      #{a.id} {a.name} {a.is_default ? "(default)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {addressItems.length === 0 ? (
+                <p style={ui.hint}>
+                  住所がありません。先に「住所」ページで住所を登録してください。
+                </p>
+              ) : null}
             </div>
-          )}
-        </div>
-      ) : null}
 
-      {/* 住所 + 注文確定 */}
-      {addresses ? (
-        <div style={{ display: "grid", gap: 8 }}>
-          <label>
-            住所:
-            <select
-              value={selectedId ?? ""}
-              onChange={(e) =>
-                setSelectedId(e.target.value ? Number(e.target.value) : null)
+            <button
+              onClick={() => void onOrder()}
+              disabled={
+                isSubmitting || addressItems.length === 0 || isCartEmpty
               }
-              style={{ marginLeft: 8 }}
-              disabled={isSubmitting}
+              style={{
+                ...ui.buttonPrimary,
+                ...(isSubmitting || addressItems.length === 0 || isCartEmpty
+                  ? ui.buttonPrimaryDisabled
+                  : null),
+              }}
             >
-              <option value="">(select)</option>
-              {addressItems.map((a) => (
-                <option key={a.id} value={a.id}>
-                  #{a.id} {a.name} {a.is_default ? "(default)" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+              注文を確定する
+            </button>
 
-          {addressItems.length === 0 ? (
-            <p style={{ opacity: 0.8 }}>
-              住所がありません。先に「住所」ページで住所を登録してください。
-            </p>
-          ) : null}
-
-          <button
-            onClick={() => void onOrder()}
-            disabled={isSubmitting || addressItems.length === 0 || isCartEmpty}
-          >
-            注文を確定する
-          </button>
-
-          {isCartEmpty ? (
-            <p style={{ opacity: 0.8 }}>
-              注文するには、先にカートに商品を追加してください。
-            </p>
-          ) : null}
-        </div>
-      ) : (
-        <p>loading...</p>
-      )}
+            {isCartEmpty ? (
+              <p style={ui.hint}>
+                注文するには、先にカートに商品を追加してください。
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p style={ui.hint}>loading...</p>
+        )}
+      </div>
     </div>
   );
 }

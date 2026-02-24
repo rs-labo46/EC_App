@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError, authRegister } from "../api";
 import { useState } from "react";
+import { ui } from "../ui/styles";
 
 export default function SignupPage() {
   const nav = useNavigate();
@@ -29,41 +30,49 @@ export default function SignupPage() {
   }
 
   return (
-    <div style={{ maxWidth: 420 }}>
-      <h2>サインアップ</h2>
+    <div style={ui.page}>
+      <div style={ui.header}>
+        <h2 style={ui.title}>サインアップ</h2>
+        <p style={ui.subtitle}>
+          アカウントを作成して、カート・注文機能を使えるようにします。
+        </p>
+      </div>
 
-      <form
-        onSubmit={(e) => void onSubmit(e)}
-        style={{ display: "grid", gap: 8 }}
-      >
-        <label>
-          Eメール
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{ width: "100%" }}
-          />
-        </label>
+      <div style={ui.card}>
+        <form onSubmit={(e) => void onSubmit(e)} style={ui.form}>
+          <label style={ui.label}>
+            Eメール
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              style={ui.input}
+              autoComplete="email"
+            />
+          </label>
 
-        <label>
-          パスワード
-          <input
-            value={password}
-            type="password"
-            onChange={(e) => setPassword(e.target.value)}
-            style={{ width: "100%" }}
-          />
-        </label>
+          <label style={ui.label}>
+            パスワード
+            <input
+              value={password}
+              type="password"
+              onChange={(e) => setPassword(e.target.value)}
+              style={ui.input}
+              autoComplete="new-password"
+            />
+          </label>
 
-        <button type="submit">アカウントを作成</button>
-      </form>
+          <button type="submit" style={ui.buttonPrimary}>
+            アカウントを作成
+          </button>
+        </form>
 
-      {msg ? <p style={{ color: "lime" }}>{msg}</p> : null}
-      {error ? <p style={{ color: "tomato" }}>{error}</p> : null}
+        {msg ? <p style={ui.msgOk}>{msg}</p> : null}
+        {error ? <p style={ui.msgErr}>{error}</p> : null}
 
-      <p style={{ fontSize: 12, opacity: 0.8 }}>
-        すでにアカウントがある場合は <Link to="/login">Login</Link>
-      </p>
+        <p style={ui.footnote}>
+          すでにアカウントがある場合は <Link to="/login">Login</Link>
+        </p>
+      </div>
     </div>
   );
 }
