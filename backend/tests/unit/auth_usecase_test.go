@@ -3,7 +3,7 @@ package unit
 import (
 	"app/internal/config"
 	"app/internal/domain/model"
-	"app/internal/usecase" // ★ 追加：usecaseパッケージを参照する
+	"app/internal/usecase"
 	"context"
 	"testing"
 	"time"
@@ -14,7 +14,7 @@ import (
 )
 
 // =====================
-// モック: UserRepository
+// Mock: UserRepository
 // =====================
 
 type MockUserRepository struct {
@@ -49,7 +49,7 @@ func (m *MockUserRepository) IncrementTokenVersion(ctx context.Context, id int64
 }
 
 // =====================
-// モック: AuthValidator
+// Mock: AuthValidator
 // =====================
 
 type MockAuthValidator struct {
@@ -82,7 +82,7 @@ func (m *MockAuthValidator) ValidateForceLogout(ctx context.Context, targetUserI
 }
 
 // =====================
-// モック: RefreshTokenRepository
+// Mock: RefreshTokenRepository
 // =====================
 
 type MockRefreshTokenRepository struct {
@@ -116,17 +116,17 @@ func (m *MockRefreshTokenRepository) DeleteByID(ctx context.Context, tokenID str
 }
 
 func (m *MockRefreshTokenRepository) DeleteExpired(ctx context.Context, now time.Time) (int64, error) {
-	args := m.Called(ctx, mock.AnythingOfType("time.Time"))
+	// ★ 重要：引数をそのまま渡す（これがズレると Unexpected Method Call になる）
+	args := m.Called(ctx, now)
 	return args.Get(0).(int64), args.Error(1)
 }
 
 // =====================
-// helper: bcrypt
+// Helper
 // =====================
 
 func mustHash(t *testing.T, plain string) string {
 	t.Helper()
-
 	b, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
 	if err != nil {
 		t.Fatalf("bcrypt failed: %v", err)
@@ -134,29 +134,34 @@ func mustHash(t *testing.T, plain string) string {
 	return string(b)
 }
 
+func newAuthUC(userRepo *MockUserRepository, rtRepo *MockRefreshTokenRepository, v *MockAuthValidator) *usecase.AuthUsecase {
+	// JWTSecret は Login/Refresh で必須
+	cfg := config.Config{JWTSecret: "test-secret"}
+	return usecase.NewAuthUsecase(cfg, userRepo, rtRepo, v)
+}
+
 // =====================
-// Test: Register（方針② login周辺の前提作りにもなる）
+// Register（参考：ユースケース単体）
 // =====================
 
 func TestAuthUsecase_Register_Success(t *testing.T) {
 	ctx := context.Background()
 
 	userRepo := new(MockUserRepository)
-	validator := new(MockAuthValidator)
 	rtRepo := new(MockRefreshTokenRepository) // Registerでは使わないがDI上必要
+	v := new(MockAuthValidator)
 
 	email := "user@test.com"
 	pass := "CorrectPW"
 
-	validator.On("ValidateRegister", mock.Anything, email, pass).Return(nil)
+	v.On("ValidateRegister", mock.Anything, email, pass).Return(nil)
 
-	// Createに渡されるuserの中身も最低限検証できる
 	userRepo.On("Create", mock.Anything, mock.MatchedBy(func(u *model.User) bool {
-		// 小学生向けに言うと：ここで「保存されるユーザーの形が正しいか」を見てる
-		return u.Email == email && u.IsActive == true && u.TokenVersion == 0 && u.PasswordHash != ""
+		// 保存されるユーザーが最低限正しい形かを見る
+		return u.Email == email && u.IsActive && u.TokenVersion == 0 && u.PasswordHash != ""
 	})).Return(nil)
 
-	u := usecase.NewAuthUsecase(config.Config{JWTSecret: "test-secret"}, userRepo, rtRepo, validator)
+	u := newAuthUC(userRepo, rtRepo, v)
 
 	resp, err := u.Register(ctx, usecase.AuthRegisterRequest{Email: email, Password: pass})
 	assert.NoError(t, err)
@@ -164,27 +169,27 @@ func TestAuthUsecase_Register_Success(t *testing.T) {
 	assert.Equal(t, email, resp.User.Email)
 
 	userRepo.AssertExpectations(t)
-	validator.AssertExpectations(t)
+	v.AssertExpectations(t)
 }
 
 // =====================
-// Test: Login 正常（方針② login A1）
+// Login（方針② login: A1/A2/A3 + 停止ユーザー）
 // =====================
 
 func TestAuthUsecase_Login_Success_A1(t *testing.T) {
 	ctx := context.Background()
 
 	userRepo := new(MockUserRepository)
-	validator := new(MockAuthValidator)
 	rtRepo := new(MockRefreshTokenRepository)
+	v := new(MockAuthValidator)
 
 	email := "user@test.com"
 	pass := "CorrectPW"
 
-	// 期限切れ掃除は失敗してもログイン継続なので、呼ばれたら0件でOKにする
+	// DeleteExpired は失敗してもログイン継続。呼ばれたら 0 件でOK
 	rtRepo.On("DeleteExpired", mock.Anything, mock.AnythingOfType("time.Time")).Return(int64(0), nil)
 
-	validator.On("ValidateLogin", mock.Anything, email, pass).Return(nil)
+	v.On("ValidateLogin", mock.Anything, email, pass).Return(nil)
 
 	userRepo.On("FindByEmail", mock.Anything, email).Return(&model.User{
 		ID:           1,
@@ -195,24 +200,380 @@ func TestAuthUsecase_Login_Success_A1(t *testing.T) {
 		IsActive:     true,
 	}, nil)
 
-	// last_login更新は失敗しても継続なので、呼ばれてもOK
+	// last_login 更新は失敗しても継続なので、呼ばれてもOK
 	userRepo.On("Update", mock.Anything, mock.AnythingOfType("*model.User")).Return(nil)
 
-	// refresh保存が呼ばれる（中身はランダムなので型だけ見る）
+	// refresh 保存が呼ばれる（中身はランダムなので型だけ確認）
 	rtRepo.On("Create", mock.Anything, mock.AnythingOfType("model.RefreshToken")).Return(nil)
 
-	u := usecase.NewAuthUsecase(config.Config{JWTSecret: "test-secret"}, userRepo, rtRepo, validator)
+	u := newAuthUC(userRepo, rtRepo, v)
 
 	res, err := u.Login(ctx, usecase.AuthLoginRequest{Email: email, Password: pass}, "UserAgent", "127.0.0.1")
-
 	assert.NoError(t, err)
 	assert.NotNil(t, res)
-	assert.NotEmpty(t, res.Body.Token.AccessToken) // 具体値はテストで固定できないので「空じゃない」を見る
+
+	assert.NotEmpty(t, res.Body.Token.AccessToken)
 	assert.Greater(t, res.Body.Token.ExpiresIn, 0)
+	assert.Equal(t, 0, res.Body.Token.TokenVersion)
+
 	assert.NotEmpty(t, res.RefreshTokenPlain)
 	assert.NotEmpty(t, res.CsrfTokenPlain)
 
 	userRepo.AssertExpectations(t)
 	rtRepo.AssertExpectations(t)
-	validator.AssertExpectations(t)
+	v.AssertExpectations(t)
+}
+
+// 方針② A2: PW違い => 401 / refresh増えない
+func TestAuthUsecase_Login_WrongPassword_A2(t *testing.T) {
+	ctx := context.Background()
+
+	userRepo := new(MockUserRepository)
+	rtRepo := new(MockRefreshTokenRepository)
+	v := new(MockAuthValidator)
+
+	email := "user@test.com"
+	pass := "WrongPW"
+
+	rtRepo.On("DeleteExpired", mock.Anything, mock.AnythingOfType("time.Time")).Return(int64(0), nil)
+	v.On("ValidateLogin", mock.Anything, email, pass).Return(nil)
+
+	// DB上のhashは正しいパスワードのもの
+	userRepo.On("FindByEmail", mock.Anything, email).Return(&model.User{
+		ID:           1,
+		Email:        email,
+		PasswordHash: mustHash(t, "CorrectPW"),
+		Role:         model.RoleUser,
+		TokenVersion: 0,
+		IsActive:     true,
+	}, nil)
+
+	u := newAuthUC(userRepo, rtRepo, v)
+
+	res, err := u.Login(ctx, usecase.AuthLoginRequest{Email: email, Password: pass}, "UA", "")
+	assert.Nil(t, res)
+	assert.ErrorIs(t, err, usecase.ErrUnauthorized)
+
+	// refresh token は作られない
+	rtRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+
+	userRepo.AssertExpectations(t)
+	rtRepo.AssertExpectations(t)
+	v.AssertExpectations(t)
+}
+
+// 方針② A3: email空 => 400（validatorが ErrValidation を返す想定）
+func TestAuthUsecase_Login_ValidationError_A3(t *testing.T) {
+	ctx := context.Background()
+
+	userRepo := new(MockUserRepository)
+	rtRepo := new(MockRefreshTokenRepository)
+	v := new(MockAuthValidator)
+
+	rtRepo.On("DeleteExpired", mock.Anything, mock.AnythingOfType("time.Time")).Return(int64(0), nil)
+
+	v.On("ValidateLogin", mock.Anything, "", "xxx").Return(usecase.ErrValidation)
+
+	u := newAuthUC(userRepo, rtRepo, v)
+
+	res, err := u.Login(ctx, usecase.AuthLoginRequest{Email: "", Password: "xxx"}, "UA", "")
+	assert.Nil(t, res)
+	assert.ErrorIs(t, err, usecase.ErrValidation)
+
+	// validatorで落ちるので repo は呼ばれない
+	userRepo.AssertNotCalled(t, "FindByEmail", mock.Anything, mock.Anything)
+
+	rtRepo.AssertExpectations(t)
+	v.AssertExpectations(t)
+}
+
+// 停止ユーザー => forbidden（方針② login 前提の is_active）
+func TestAuthUsecase_Login_InactiveUser(t *testing.T) {
+	ctx := context.Background()
+
+	userRepo := new(MockUserRepository)
+	rtRepo := new(MockRefreshTokenRepository)
+	v := new(MockAuthValidator)
+
+	email := "user@test.com"
+	pass := "CorrectPW"
+
+	rtRepo.On("DeleteExpired", mock.Anything, mock.AnythingOfType("time.Time")).Return(int64(0), nil)
+	v.On("ValidateLogin", mock.Anything, email, pass).Return(nil)
+
+	userRepo.On("FindByEmail", mock.Anything, email).Return(&model.User{
+		ID:           1,
+		Email:        email,
+		PasswordHash: mustHash(t, pass),
+		Role:         model.RoleUser,
+		TokenVersion: 0,
+		IsActive:     false,
+	}, nil)
+
+	u := newAuthUC(userRepo, rtRepo, v)
+
+	res, err := u.Login(ctx, usecase.AuthLoginRequest{Email: email, Password: pass}, "UA", "")
+	assert.Nil(t, res)
+	assert.ErrorIs(t, err, usecase.ErrForbidden)
+
+	// refresh作成されない
+	rtRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+
+	userRepo.AssertExpectations(t)
+	rtRepo.AssertExpectations(t)
+	v.AssertExpectations(t)
+}
+
+// =====================
+// Refresh（方針② refresh: R1/R2/R4/R5）
+// =====================
+
+// 方針② R1: 正常（旧token used_at 更新 + 新token追加）
+func TestAuthUsecase_Refresh_Success_R1(t *testing.T) {
+	ctx := context.Background()
+
+	userRepo := new(MockUserRepository)
+	rtRepo := new(MockRefreshTokenRepository)
+	v := new(MockAuthValidator)
+
+	refreshPlain := "refresh-plain"
+	ua := "UA"
+	userID := int64(1)
+
+	rtRepo.On("DeleteExpired", mock.Anything, mock.AnythingOfType("time.Time")).Return(int64(0), nil)
+	v.On("ValidateRefresh", mock.Anything, refreshPlain, ua).Return(nil)
+
+	rtRepo.On("FindByHash", mock.Anything, mock.AnythingOfType("string")).Return(model.RefreshToken{
+		ID:        "rt-old",
+		UserID:    userID,
+		UserAgent: ua,
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+		UsedAt:    nil,
+	}, true, nil)
+
+	userRepo.On("FindByID", mock.Anything, userID).Return(&model.User{
+		ID:           userID,
+		Email:        "user@test.com",
+		Role:         model.RoleUser,
+		TokenVersion: 0,
+		IsActive:     true,
+	}, nil)
+
+	rtRepo.On("MarkUsed", mock.Anything, "rt-old").Return(nil)
+	rtRepo.On("Create", mock.Anything, mock.AnythingOfType("model.RefreshToken")).Return(nil)
+
+	u := newAuthUC(userRepo, rtRepo, v)
+
+	res, err := u.Refresh(ctx, refreshPlain, ua, "127.0.0.1")
+	assert.NoError(t, err)
+	assert.NotNil(t, res)
+
+	assert.NotEmpty(t, res.Body.AccessToken)
+	assert.Greater(t, res.Body.ExpiresIn, 0)
+	assert.Equal(t, 0, res.Body.TokenVersion)
+
+	assert.NotEmpty(t, res.RefreshTokenPlain)
+	assert.NotEmpty(t, res.CsrfTokenPlain)
+
+	userRepo.AssertExpectations(t)
+	rtRepo.AssertExpectations(t)
+	v.AssertExpectations(t)
+}
+
+// 方針② R2: 期限切れ => DeleteByID + 401
+func TestAuthUsecase_Refresh_Expired_R2(t *testing.T) {
+	ctx := context.Background()
+
+	userRepo := new(MockUserRepository)
+	rtRepo := new(MockRefreshTokenRepository)
+	v := new(MockAuthValidator)
+
+	refreshPlain := "expired"
+	ua := "UA"
+
+	rtRepo.On("DeleteExpired", mock.Anything, mock.AnythingOfType("time.Time")).Return(int64(0), nil)
+	v.On("ValidateRefresh", mock.Anything, refreshPlain, ua).Return(nil)
+
+	rtRepo.On("FindByHash", mock.Anything, mock.AnythingOfType("string")).Return(model.RefreshToken{
+		ID:        "rt-exp",
+		UserID:    1,
+		UserAgent: ua,
+		ExpiresAt: time.Now().Add(-1 * time.Minute),
+		UsedAt:    nil,
+	}, true, nil)
+
+	rtRepo.On("DeleteByID", mock.Anything, "rt-exp").Return(nil)
+
+	u := newAuthUC(userRepo, rtRepo, v)
+
+	res, err := u.Refresh(ctx, refreshPlain, ua, "")
+	assert.Nil(t, res)
+	assert.ErrorIs(t, err, usecase.ErrUnauthorized)
+
+	rtRepo.AssertExpectations(t)
+	v.AssertExpectations(t)
+}
+
+// 方針② R4: 再利用（used_atあり）=> DeleteByUserID + incident
+func TestAuthUsecase_Refresh_Replay_R4(t *testing.T) {
+	ctx := context.Background()
+
+	userRepo := new(MockUserRepository)
+	rtRepo := new(MockRefreshTokenRepository)
+	v := new(MockAuthValidator)
+
+	refreshPlain := "used"
+	ua := "UA"
+	userID := int64(1)
+	usedAt := time.Now().Add(-1 * time.Minute)
+
+	rtRepo.On("DeleteExpired", mock.Anything, mock.AnythingOfType("time.Time")).Return(int64(0), nil)
+	v.On("ValidateRefresh", mock.Anything, refreshPlain, ua).Return(nil)
+
+	rtRepo.On("FindByHash", mock.Anything, mock.AnythingOfType("string")).Return(model.RefreshToken{
+		ID:        "rt-used",
+		UserID:    userID,
+		UserAgent: ua,
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+		UsedAt:    &usedAt,
+	}, true, nil)
+
+	rtRepo.On("DeleteByUserID", mock.Anything, userID).Return(nil)
+
+	u := newAuthUC(userRepo, rtRepo, v)
+
+	res, err := u.Refresh(ctx, refreshPlain, ua, "")
+	assert.Nil(t, res)
+	assert.ErrorIs(t, err, usecase.ErrSecurityIncident)
+
+	rtRepo.AssertExpectations(t)
+	v.AssertExpectations(t)
+}
+
+// 方針② R5: user_agent違い => DeleteByUserID + incident
+func TestAuthUsecase_Refresh_UserAgentMismatch_R5(t *testing.T) {
+	ctx := context.Background()
+
+	userRepo := new(MockUserRepository)
+	rtRepo := new(MockRefreshTokenRepository)
+	v := new(MockAuthValidator)
+
+	refreshPlain := "ua-mismatch"
+	ua := "UA-NEW"
+	userID := int64(1)
+
+	rtRepo.On("DeleteExpired", mock.Anything, mock.AnythingOfType("time.Time")).Return(int64(0), nil)
+	v.On("ValidateRefresh", mock.Anything, refreshPlain, ua).Return(nil)
+
+	rtRepo.On("FindByHash", mock.Anything, mock.AnythingOfType("string")).Return(model.RefreshToken{
+		ID:        "rt-ua",
+		UserID:    userID,
+		UserAgent: "UA-OLD",
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+		UsedAt:    nil,
+	}, true, nil)
+
+	rtRepo.On("DeleteByUserID", mock.Anything, userID).Return(nil)
+
+	u := newAuthUC(userRepo, rtRepo, v)
+
+	res, err := u.Refresh(ctx, refreshPlain, ua, "")
+	assert.Nil(t, res)
+	assert.ErrorIs(t, err, usecase.ErrSecurityIncident)
+
+	rtRepo.AssertExpectations(t)
+	v.AssertExpectations(t)
+}
+
+// =====================
+// Logout（方針② logout: L1/L3）
+// =====================
+
+// 方針② L1: 正常（FindByHash -> DeleteByID）
+func TestAuthUsecase_Logout_Success_L1(t *testing.T) {
+	ctx := context.Background()
+
+	userRepo := new(MockUserRepository)
+	rtRepo := new(MockRefreshTokenRepository)
+	v := new(MockAuthValidator)
+
+	refreshPlain := "refresh-plain"
+
+	v.On("ValidateLogout", mock.Anything).Return(nil)
+
+	rtRepo.On("FindByHash", mock.Anything, mock.AnythingOfType("string")).Return(model.RefreshToken{
+		ID:     "rt-logout",
+		UserID: 1,
+	}, true, nil)
+
+	rtRepo.On("DeleteByID", mock.Anything, "rt-logout").Return(nil)
+
+	u := newAuthUC(userRepo, rtRepo, v)
+
+	res, err := u.Logout(ctx, refreshPlain)
+	assert.NoError(t, err)
+	assert.NotNil(t, res)
+	assert.Equal(t, "logout success", res.Message)
+
+	rtRepo.AssertExpectations(t)
+	v.AssertExpectations(t)
+}
+
+// 方針② L3: cookie削除など（token空）=> 401
+func TestAuthUsecase_Logout_EmptyToken_L3(t *testing.T) {
+	ctx := context.Background()
+
+	userRepo := new(MockUserRepository)
+	rtRepo := new(MockRefreshTokenRepository)
+	v := new(MockAuthValidator)
+
+	v.On("ValidateLogout", mock.Anything).Return(nil)
+
+	u := newAuthUC(userRepo, rtRepo, v)
+
+	res, err := u.Logout(ctx, "")
+	assert.Nil(t, res)
+	assert.ErrorIs(t, err, usecase.ErrUnauthorized)
+
+	v.AssertExpectations(t)
+}
+
+// =====================
+// ForceLogout（方針② 強制ログアウト: F1/F2）
+// =====================
+
+func TestAuthUsecase_ForceLogout_Success_F1F2(t *testing.T) {
+	ctx := context.Background()
+
+	userRepo := new(MockUserRepository)
+	rtRepo := new(MockRefreshTokenRepository)
+	v := new(MockAuthValidator)
+
+	targetUserID := int64(10)
+
+	v.On("ValidateForceLogout", mock.Anything, targetUserID).Return(nil)
+
+	userRepo.On("IncrementTokenVersion", mock.Anything, targetUserID).Return(nil)
+	rtRepo.On("DeleteByUserID", mock.Anything, targetUserID).Return(nil)
+
+	// 更新後取得して new_token_version を返す
+	userRepo.On("FindByID", mock.Anything, targetUserID).Return(&model.User{
+		ID:           targetUserID,
+		Email:        "user@test.com",
+		Role:         model.RoleUser,
+		TokenVersion: 5,
+		IsActive:     true,
+	}, nil)
+
+	u := newAuthUC(userRepo, rtRepo, v)
+
+	res, err := u.ForceLogout(ctx, targetUserID)
+	assert.NoError(t, err)
+	assert.NotNil(t, res)
+	assert.Equal(t, targetUserID, res.UserID)
+	assert.Equal(t, 5, res.NewTokenVersion)
+
+	userRepo.AssertExpectations(t)
+	rtRepo.AssertExpectations(t)
+	v.AssertExpectations(t)
 }
