@@ -3,9 +3,12 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 )
@@ -259,4 +262,88 @@ func Test_AdminOrders_List_And_StatusUpdate_And_CancelRules(t *testing.T) {
 
 	// SHIPPED → CANCELED は400になること
 	updateOrderStatusExpect400(t, c, ctx, access, orderID2, "CANCELED", "cannot change shipped order")
+}
+
+// =====================
+// DB helpers (audit_logs 検証用)
+// =====================
+
+func mustOpenDB(t *testing.T) *sql.DB {
+	t.Helper()
+
+	host := os.Getenv("POSTGRES_HOST")
+	port := os.Getenv("POSTGRES_PORT")
+	user := os.Getenv("POSTGRES_USER")
+	pass := os.Getenv("POSTGRES_PASSWORD")
+	dbname := os.Getenv("POSTGRES_DB")
+
+	if host == "" || port == "" || user == "" || pass == "" || dbname == "" {
+		t.Fatalf("POSTGRES_* env is required for DB check (HOST/PORT/USER/PASSWORD/DB)")
+	}
+
+	// pgx stdlib DSN
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+		user, pass, host, port, dbname)
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open(pgx) failed: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		t.Fatalf("db.Ping failed: %v", err)
+	}
+	return db
+}
+
+// audit_logs に「注文ステータス更新」のログがあるか確認する
+func assertAuditOrderStatus(t *testing.T, db *sql.DB, orderID int64, beforeStatus string, afterStatus string) {
+	t.Helper()
+
+	wantBefore := fmt.Sprintf(`{"status":"%s"}`, beforeStatus)
+	wantAfter := fmt.Sprintf(`{"status":"%s"}`, afterStatus)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var cnt int
+	// テーブル/カラム名が違う場合はここで落ちる（その時はエラー文を貼ってくれれば合わせる）
+	err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM audit_logs
+		WHERE action = 'UPDATE_ORDER_STATUS'
+		  AND resource_type = 'ORDER'
+		  AND resource_id = $1
+		  AND before_json = $2
+		  AND after_json = $3
+	`, orderID, wantBefore, wantAfter).Scan(&cnt)
+
+	if err != nil {
+		t.Fatalf("audit_logs query failed: %v", err)
+	}
+	if cnt < 1 {
+		t.Fatalf("audit log not found: order_id=%d before=%s after=%s", orderID, wantBefore, wantAfter)
+	}
+}
+
+// orders テーブルから現在の status を取る（before_status を作る用）
+func mustGetOrderStatus(t *testing.T, db *sql.DB, orderID int64) string {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var st string
+	err := db.QueryRowContext(ctx, `SELECT status FROM orders WHERE id = $1`, orderID).Scan(&st)
+	if err != nil {
+		t.Fatalf("select orders.status failed: %v", err)
+	}
+	if st == "" {
+		t.Fatalf("empty status for order_id=%d", orderID)
+	}
+	return st
 }
