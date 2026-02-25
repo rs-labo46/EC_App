@@ -168,6 +168,35 @@ curl -i -b cookies.txt -c cookies.txt -X POST http://localhost:8080/auth/logout 
 
 ## Admin（管理者）
 
+ADMIN作成
+
+- ユーザー登録（
+  curl -i -X POST http://localhost:8080/auth/register \
+   -H 'Content-Type: application/json' \
+   -d '{"email":"a@example.com","password":"password123"}'
+
+- DBで role を ADMIN に変更
+  docker exec -it ec-db-1 psql -U myuser -d mydb -c \
+  "update users set role='ADMIN' where email='admin@test.com';"
+
+- 変更できたか確認
+  docker exec -it ec-db-1 psql -U myuser -d mydb -c \
+  "select id,email,role,token_version,is_active from users order by id;"
+
+- ADMINとしてログインしてACCESSを取る
+  ACCESS=$(curl -s -c cookies.txt -X POST http://localhost:8080/auth/login \
+   -H 'Content-Type: application/json' \
+   -d '{"email":"admin@test.com","password":"password123"}' \
+   | python3 -c 'import sys, json; print(json.load(sys.stdin)["token"]["access_token"])')
+
+echo "ACCESS=[$ACCESS]"
+
+- 商品作成
+  curl -i -X POST http://localhost:8080/admin/products \
+   -H "Authorization: Bearer $ACCESS" \
+   -H "Content-Type: application/json" \
+   -d '{"name":"Coffee Beans A","description":"tasty","price":1200,"stock":50,"is_active":true}'
+
 - 在庫更新（admin only）※監査ログが残る
   curl -i -X PUT http://localhost:8080/admin/inventory/1 \
    -H "Authorization: Bearer $ACCESS" \
