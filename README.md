@@ -173,7 +173,7 @@ ADMIN作成
 - ユーザー登録（
   curl -i -X POST http://localhost:8080/auth/register \
    -H 'Content-Type: application/json' \
-   -d '{"email":"a@example.com","password":"password123"}'
+   -d '{"email":"admin@test.com","password":"password123"}'
 
 - DBで role を ADMIN に変更
   docker exec -it ec-db-1 psql -U myuser -d mydb -c \
